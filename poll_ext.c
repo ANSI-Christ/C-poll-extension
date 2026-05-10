@@ -159,7 +159,7 @@ static size_t _poll_inc(const size_t s){
     return s<<1;
 }
 
-void *poll_loop(poll_config_t * const cfg){
+void poll_loop(poll_config_t * const cfg){
     struct _poll_glob * const g=_poll_glob;
     void*(* const allocator)(size_t)=((cfg && cfg->allocator) ? cfg->allocator : malloc);
     void(* const deallocator)(void*)=((cfg && cfg->deallocator) ? cfg->deallocator : free);
@@ -263,8 +263,6 @@ _mark:
         WSACleanup();
     }
     mtx(0);
-
-    return NULL;
 }
 
 void poll_unloop(void){

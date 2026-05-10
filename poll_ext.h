@@ -18,7 +18,7 @@ typedef struct{
     int get_result; /* sets -1 on error and 1 on success*/
 }poll_config_t;
 
-void *poll_loop(poll_config_t *cfg);
+void poll_loop(poll_config_t *cfg);
 void poll_unloop(void);
 
 int poll_recv(void *os_socket,void(*callback)(int err,void *arg),void *arg);
