@@ -8,6 +8,12 @@
 #include <string.h>
 #include <time.h>
 
+#ifdef offsetof
+#define _POLL_OFFSETOF offsetof
+#else
+#define _POLL_OFFSETOF(_1_,_2_) ((size_t)&((_1_*)0)->_2_)
+#endif
+
 #ifdef _WIN32
 
 #define NOMINMAX
@@ -21,12 +27,9 @@ static int _poll_startup(int ver){
     return !WSAStartup(ver,&w);
 }
 
+#define _poll_setopt(_s_,_o_,_p_,_l_) setsockopt((_s_),SOL_SOCKET,(_o_),(const char*)(_p_),(_l_))
 static int _poll_getopt(SOCKET s,const int o,void * const p,const unsigned int l){
     int ls=l; return getsockopt(s,SOL_SOCKET,o,(char*)p,&ls);
-}
-
-static int _poll_setopt(SOCKET s,const int o,const void * const p,const unsigned int l){
-    return setsockopt(s,SOL_SOCKET,o,(const char*)p,l);
 }
 
 static int _poll_pipe(void * const s){
@@ -83,17 +86,15 @@ typedef int SOCKET;
 #define WSAEBADF EBADF
 #define WSAEINVAL EINVAL
 #define WSAENOBUFS ENOMEM
+#define WSAEMSGSIZE EMSGSIZE
 #define WSAETIMEDOUT ETIMEDOUT
 #define WSAELOOP ENXIO
 #define SD_BOTH SHUT_RDWR
 #define _poll_startup(ver) (1)
 
+#define _poll_setopt(_s_,_o_,_p_,_l_) setsockopt((_s_),SOL_SOCKET,(_o_),(_p_),(_l_))
 static int _poll_getopt(SOCKET s,const int o,void * const p,const unsigned int l){
     unsigned int ls=l; return getsockopt(s,SOL_SOCKET,o,p,&ls);
-}
-
-static int _poll_setopt(SOCKET s,const int o,const void * const p,const unsigned int l){
-    return setsockopt(s,SOL_SOCKET,o,p,l);
 }
 
 static int _poll_pipe(void * const s){
@@ -127,15 +128,15 @@ static struct _poll_glob{
     unsigned int count;
 }_poll_glob[1]={{{INVALID_SOCKET,INVALID_SOCKET},0}};
 
+
 int _poll_socket_error(void * const s){
     int e=0;
-    if(_poll_getopt(*(SOCKET*)s,SO_ERROR,&e,sizeof(e)))
-        return SOCKET_ERROR;
+    _poll_getopt(*(SOCKET*)s,SO_ERROR,&e,sizeof(e));
     return e;
 }
 
 static int _poll_getcmd(SOCKET s,struct pollcmd * const cmd){
-    unsigned int l=offsetof(struct pollcmd,size);
+    unsigned int l=_POLL_OFFSETOF(struct pollcmd,size);
     char *d=(char*)cmd;
     do{
         const int c=recv(s,d,l,MSG_NOSIGNAL);
@@ -148,10 +149,10 @@ static int _poll_getcmd(SOCKET s,struct pollcmd * const cmd){
 
 static int _poll_setcmd(SOCKET s,const struct pollcmd * const cmd){
     while(1){
-        const int c=send(s,(const char*)cmd,offsetof(struct pollcmd,size),MSG_NOSIGNAL);
-        if(c==offsetof(struct pollcmd,size)) break;
+        const int c=send(s,(const char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL);
+        if(c==_POLL_OFFSETOF(struct pollcmd,size)) break;
         if(c==SOCKET_ERROR && WSAGetLastError()!=WSAEINTR) return SOCKET_ERROR;
-        else if(c!=0) return -2;
+        else if(c!=0){WSASetLastError(WSAEMSGSIZE); return SOCKET_ERROR;}
     }
     return 0;
 }
@@ -197,7 +198,7 @@ void poll_loop(poll_config_t * const cfg){
 
     while(run==1){
         const int _c=WSAPoll(fd,count,(t?1000:-1));
-        unsigned int repeat=20, i=count, c=(_c>0?_c:0);
+        unsigned int repeat=20, i=count, c=((_c!=SOCKET_ERROR)?_c:0);
 
         if(c && fd->revents){
             struct pollcmd cmd; --c;
@@ -338,7 +339,7 @@ static char *_dns_host_encode(const char *s,char *p){
 static int _dns_make_request(SOCKET s,const int af,const char * const host){
     struct _dns_header h;
     char * const p=_dns_host_encode(host,(char*)h.data);
-    if(p && (size_t)(p-(char*)&h.data)<512){
+    if(p){
         struct tmp{char _[4];};
         union{unsigned short x[2]; struct tmp c;} u={{(af==AF_INET)?1:28,1}};
         const unsigned int l=(size_t)(p-(char*)&h)+5;
@@ -348,19 +349,18 @@ static int _dns_make_request(SOCKET s,const int af,const char * const host){
         h.qdc=1; b2net(&h.qdc);
         h.anc=h.nsc=h.arc=0;
         *((struct tmp*)(p+1))=u.c;
-        return send(s,(char*)&h,l,MSG_NOSIGNAL)==l;
+        return send(s,(const char*)&h,l,MSG_NOSIGNAL)==l;
     }
     return 0;
 }
 
 int DNS_request(const char * dns,const int family,const char * const host,void * const out_socket){
     if(host && out_socket){
+        struct sockaddr_in a; memset(&a,0,sizeof(a));
         if(!dns) dns="8.8.8.8";
-        SOCKET s=socket(AF_INET,SOCK_DGRAM,0);
-        if(s!=INVALID_SOCKET){
-            struct sockaddr_in a;
-            memset(&a,0,sizeof(a));
-            if(_dns_parse(dns,(char*)&a.sin_addr)){
+        if(_dns_parse(dns,(char*)&a.sin_addr)){
+            SOCKET s=socket(AF_INET,SOCK_DGRAM,0);
+            if(s!=INVALID_SOCKET){
                 a.sin_family=AF_INET;
                 a.sin_port=53; b2net(&a.sin_port);
                 connect(s,(struct sockaddr*)&a,sizeof(a));
@@ -368,20 +368,22 @@ int DNS_request(const char * dns,const int family,const char * const host,void *
                     *(SOCKET*)out_socket=s;
                     return 0;
                 }
+                closesocket(s);
             }
-            closesocket(s);
         }
-    }else WSASetLastError(WSAEINVAL);
+    }
+    WSASetLastError(WSAEINVAL);
     *(SOCKET*)out_socket=INVALID_SOCKET;
     return SOCKET_ERROR;
 }
-
 
 int DNS_response(void * const s,struct DNS_response * const a){
     struct _dns_header h;
     const int bytes=recv(*(SOCKET*)s,(char*)&h,sizeof(h),MSG_NOSIGNAL);
     closesocket(*(SOCKET*)s);
-    a->count=0; b2host(&h.i); b2host(&h.f);
+    a->count=0;
+    if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
+    b2host(&h.i); b2host(&h.f);
     if(bytes>11 && h.i==0xdb42 && !(h.f & 15) && h.anc){
         const unsigned char *p=h.data;
         unsigned int i; b2host(&h.qdc); b2host(&h.anc);
@@ -404,5 +406,6 @@ int DNS_response(void * const s,struct DNS_response * const a){
         }
         return 0;
     }
+    WSASetLastError(-1);
     return SOCKET_ERROR;
 }
