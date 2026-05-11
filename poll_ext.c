@@ -33,9 +33,10 @@ static int _poll_pipe(void * const s){
     SOCKET l,r,w;
     struct sockaddr_in addr;
     int len=sizeof(addr);
+    unsigned char * const ip=(unsigned char*)&addr.sin_addr;
     memset(&addr,0,sizeof(addr));
     addr.sin_family=AF_INET; addr.sin_port=0;
-    addr.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
+    ip[0]=127; ip[1]=ip[2]=0; ip[3]=1;
     if( (l=socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET )
         goto _clean1;
     if(bind(l,(struct sockaddr*)&addr,len)==SOCKET_ERROR || listen(l,1)==SOCKET_ERROR)
@@ -67,6 +68,7 @@ int socket_unblock(void * const s){
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <netinet/in.h>
 #include <sys/socket.h>
 
 typedef int SOCKET;
@@ -307,4 +309,100 @@ int poll_both(void * const s,void(* const f)(int,void*),void * const a){
 
 int poll_both_tm(void * const s,void(* const f)(int,void*),void * const a,const unsigned int t){
     return _poll_add(s,POLLIN|POLLOUT,f,a,time(NULL)+t);
+}
+
+/* ------------------- useful things --------------------- */
+
+struct _dns_header{
+    unsigned short i, f, qdc, anc, nsc, arc;
+    unsigned char data[512];
+};
+
+static int _dns_parse(const char * const s,char * const p){
+    unsigned int a,b,c,d;
+    if(sscanf(s,"%u.%u.%u.%u",&a,&b,&c,&d)!=4 || a>255 || b>255 || c>255 || d>255)
+        return 0;
+    p[0]=a; p[1]=b; p[2]=c; p[3]=d; return 1;
+}
+
+static char *_dns_host_encode(const char *s,char *p){
+    char x=*s;
+    while(x){
+        char * const c=p;
+        do{*(++p)=*(s++);}while(*p && *p!='.');
+        {const size_t l=(size_t)(p-c)-1; if(l>63){return NULL;} *c=l;} x=*p;
+    } *p=0;
+    return p;
+}
+
+static int _dns_make_request(SOCKET s,const int af,const char * const host){
+    struct _dns_header h;
+    char * const p=_dns_host_encode(host,(char*)h.data);
+    if(p && (size_t)(p-(char*)&h.data)<512){
+        struct tmp{char _[4];};
+        union{unsigned short x[2]; struct tmp c;} u={{(af==AF_INET)?1:28,1}};
+        const unsigned int l=(size_t)(p-(char*)&h)+5;
+        b2net(&u.x[0]); b2net(&u.x[1]);
+        h.i=0xdb42; b2net(&h.i);
+        h.f=0x0100; b2net(&h.f);
+        h.qdc=1; b2net(&h.qdc);
+        h.anc=h.nsc=h.arc=0;
+        *((struct tmp*)(p+1))=u.c;
+        return send(s,(char*)&h,l,MSG_NOSIGNAL)==l;
+    }
+    return 0;
+}
+
+int DNS_request(const char * dns,const int family,const char * const host,void * const out_socket){
+    if(host && out_socket){
+        if(!dns) dns="8.8.8.8";
+        SOCKET s=socket(AF_INET,SOCK_DGRAM,0);
+        if(s!=INVALID_SOCKET){
+            struct sockaddr_in a;
+            memset(&a,0,sizeof(a));
+            if(_dns_parse(dns,(char*)&a.sin_addr)){
+                a.sin_family=AF_INET;
+                a.sin_port=53; b2net(&a.sin_port);
+                connect(s,(struct sockaddr*)&a,sizeof(a));
+                if(_dns_make_request(s,family,host)){
+                    *(SOCKET*)out_socket=s;
+                    return 0;
+                }
+            }
+            closesocket(s);
+        }
+    }else WSASetLastError(WSAEINVAL);
+    *(SOCKET*)out_socket=INVALID_SOCKET;
+    return SOCKET_ERROR;
+}
+
+
+int DNS_response(void * const s,struct DNS_response * const a){
+    struct _dns_header h;
+    const int bytes=recv(*(SOCKET*)s,(char*)&h,sizeof(h),MSG_NOSIGNAL);
+    closesocket(*(SOCKET*)s);
+    a->count=0; b2host(&h.i); b2host(&h.f);
+    if(bytes>11 && h.i==0xdb42 && !(h.f & 15) && h.anc){
+        const unsigned char *p=h.data;
+        unsigned int i; b2host(&h.qdc); b2host(&h.anc);
+        for(i=h.qdc;i;--i,p+=5)
+            while(*p) p+=(*p)+1;
+        for(i=h.anc;i && a->count<(sizeof(a->ip)/sizeof(*a->ip));--i){
+            if((*p & 0xC0)==0xC0) ++p;
+            else while(*p) p+=(*p)+1;
+            {union addr{
+                struct{char _[10];}buf;
+                struct{unsigned short t; char _[6]; unsigned short l;}ip;
+            }addr={((union addr*)++p)->buf}; p+=10;
+            b2host(&addr.ip.t);
+            b2host(&addr.ip.l);
+            if((addr.ip.t==1 && addr.ip.l==4) || (addr.ip.t==28 && addr.ip.l==16)){
+                memcpy(a->ip[a->count].addr,p,(a->ip[a->count].len=addr.ip.l));
+                ++a->count;
+            }
+            p+=addr.ip.l;}
+        }
+        return 0;
+    }
+    return SOCKET_ERROR;
 }
