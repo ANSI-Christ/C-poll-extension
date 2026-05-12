@@ -335,14 +335,18 @@ static char *_dns_parse_request(const char *s,char *p){
     return p;
 }
 
-int DNS_request(void * const s,const int family,const char * const host){
-    if(s && host){
+int DNS_request(void * const _s,const int family,const char * const host){
+    if(_s && host){
+        SOCKET s=*(SOCKET*)_s;
         struct _dns_header h;
+        int st=SOCK_DGRAM;
         char * const p=_dns_parse_request(host,(char*)h.data);
+        if(_poll_getopt(s,SO_TYPE,&st,sizeof(st))==SOCKET_ERROR)
+            return SOCKET_ERROR;
         if(p){
             struct tmp{char _[4];};
             union{unsigned short x[2]; struct tmp c;} u={{0,1}};
-            const unsigned int l=(size_t)(p-(char*)&h)+5;
+            const unsigned short l=(size_t)(p-(char*)&h)+5;
             unsigned short c=0,i,af[2];
             b2net(&u.x[1]);
             h.i=0xdb42; b2net(&h.i);
@@ -361,7 +365,7 @@ int DNS_request(void * const s,const int family,const char * const host){
             while(i){
                 u.x[0]=af[--i]; b2net(&u.x[0]);
                 *((struct tmp*)(p+1))=u.c;
-                c+=(send(*(SOCKET*)s,(const char*)&h,l,MSG_NOSIGNAL)==l);
+                c+=(st==SOCK_DGRAM || send(s,&l,2,MSG_NOSIGNAL)==2) && (send(s,(const char*)&h,l,MSG_NOSIGNAL)==l);
             }
             return c;
         }
@@ -397,10 +401,20 @@ static int _dns_parse_answer(struct _dns_header * const h,struct DNS_addr * cons
     return count;
 }
 
-int DNS_response(void * const s,struct DNS_addr * const a,const unsigned int size){
-    if(s && a){
+int DNS_response(void * const _s,struct DNS_addr * const a,const unsigned int size){
+    if(_s && a){
         struct _dns_header h;
-        const int bytes=recv(*(SOCKET*)s,(char*)&h,sizeof(h),MSG_NOSIGNAL);
+        SOCKET s=*(SOCKET*)_s;
+        int st=SOCK_DGRAM, bytes=sizeof(h);
+        if(_poll_getopt(s,SO_TYPE,&st,sizeof(st))==SOCKET_ERROR)
+            return SOCKET_ERROR;
+        if(st!=SOCK_DGRAM){
+            unsigned short sz;
+            bytes=recv(s,(char*)&sz,2,MSG_NOSIGNAL);
+            if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
+            b2host(&sz); bytes=sz;
+        }
+        bytes=recv(s,(char*)&h,bytes,MSG_NOSIGNAL);
         if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
         if(bytes>11) return _dns_parse_answer(&h,a,size);
         WSASetLastError(-1); return 0;
