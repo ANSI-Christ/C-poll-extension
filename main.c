@@ -4,6 +4,11 @@
 
 #include "poll_ext.c"
 
+#ifdef _WIN32
+    #define TIMEOUT WSAETIMEDOUT
+#else
+    #define TIMEOUT ETIMEDOUT
+#endif
 
 void sleepf(double sec){
     struct timespec t={(time_t)sec,0}; t.tv_nsec=(sec-t.tv_sec)*1000000000;
@@ -16,31 +21,105 @@ static void gmtx(const int lock){
     else pthread_mutex_unlock(mtx);
 }
 
+static void on_init(int err,void *arg){
+    int *x=(int*)arg;
+    x[1]=err; x[0]=0;
+}
+
+
+
 struct statemachine{
     int state, wait, err;
+    SOCKET s;
 };
 
-static void callback(int err,void *arg){
+static void smcallback(int err,void *arg){
     struct statemachine * const m=(struct statemachine *)arg;
     m->err=err;
     m->wait=0;
 }
 
-#ifdef _WIN32
+int statemachine(struct statemachine * const m){
+    switch(m->state){
+        case 0:{
+            struct sockaddr_in a;
+            printf("state=%d\n",m->state);
+            if( (m->s=socket(AF_INET,SOCK_DGRAM,0))==INVALID_SOCKET){
+                printf("\tDNS socket err\n");
+                return -1;
+            }
 
-#define INPROGRESS() WSAGetLastError()==WSAEWOULDBLOCK
-#define TIMEOUT WSAETIMEDOUT
+            memset(&a,0,sizeof(a));
+            a.sin_family=AF_INET;
+            a.sin_port=53; b2net(&a.sin_port);
+            a.sin_addr.s_addr=0x08080808; b2net(&a.sin_addr.s_addr); /* 8.8.8.8 */
+            connect(m->s,(struct sockaddr*)&a,sizeof(a));
 
-#else
+            if(DNS_request(&m->s,AF_INET,"httpbin.org")!=1){
+                printf("\tDNS request err\n");
+                return -1;
+            }
+            m->state=1; m->wait=1;
+            poll_recv_tm(&m->s,smcallback,m,10);
+            return 0;
+        }
+        case 1:{
+            struct sockaddr_in a;
+            struct DNS_addr ip;
+            printf("state=%d\n",m->state);
+            if(DNS_response(&m->s,&ip,1)!=1){
+                closesocket(m->s);
+                printf("\tDNS response err\n");
+                return -1;
+            }
 
-#define INPROGRESS() errno==EINPROGRESS
-#define TIMEOUT ETIMEDOUT
+            memset(&a,0,sizeof(a));
+            a.sin_family=AF_INET;
+            a.sin_port=80; b2net(&a.sin_port);
+            memcpy(&a.sin_addr,ip.ip,ip.len);
 
-#endif
-
-static void on_init(int err,void *arg){
-    int *x=(int*)arg;
-    x[1]=err; x[0]=0;
+            closesocket(m->s);
+            if( (m->s=socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET){
+                printf("\tclient socket err\n");
+                return -1;
+            }
+            socket_unblock(&m->s);
+            connect(m->s,(struct sockaddr*)&a,sizeof(a));
+            m->state=2; m->wait=1;
+            poll_both_tm(&m->s,smcallback,m,10);
+            return 0;
+        }
+        case 2:{
+            printf("state=%d\n",m->state);
+            if(m->err==TIMEOUT){
+                closesocket(m->s);
+                printf("\trecv timeout\n"); return -1;
+            }
+            {
+                const char *req = "GET /delay/5 HTTP/1.1\r\nHost: httpbin.org\r\nConnection: close\r\n\r\n";
+                send(m->s,req,strlen(req),MSG_NOSIGNAL);
+            }
+            m->state=3;
+        }
+        case 3:{
+            char buf[4096];
+            int c;
+            printf("state=%d\n",m->state);
+            if(m->err==TIMEOUT){
+                closesocket(m->s);
+                printf("\trecv timeout\n");
+                return -1;
+            }
+            c=recv(m->s,buf,sizeof(buf),0);
+            printf("\trecv %d\n",c);
+            if(c==SOCKET_ERROR){
+                m->wait=1; poll_recv_tm(&m->s,smcallback,m,10); return 0;
+            }
+            buf[c]=0; printf("\n\n\"%s\"\n\n",buf);
+            closesocket(m->s);
+        }break;
+    }
+    return 1;
 }
 
 int main(){
@@ -63,78 +142,15 @@ int main(){
     }
 
     if( (N=i) ){
-        const char *req = "GET /delay/5 HTTP/1.1\r\nHost: httpbin.org\r\nConnection: close\r\n\r\n";
-        struct sockaddr_in a;
         struct statemachine m={0,0,0};
-        SOCKET s=socket(AF_INET,SOCK_STREAM,0);
-        socket_unblock(&s);
-
-
-        {
-            SOCKET sd=socket(AF_INET,SOCK_DGRAM,0);
-            struct sockaddr_in ad;
-            struct DNS_addr ip={0};
-            char str[32];
-
-            memset(&ad,0,sizeof(ad));
-            ad.sin_family=AF_INET; ad.sin_port=53; b2net(&ad.sin_port);
-            ad.sin_addr.s_addr=0x08080808; b2net(&ad.sin_addr.s_addr); /* 8.8.8.8 */
-            connect(sd,(struct sockaddr*)&ad,sizeof(ad));
-
-            if(DNS_request(&sd,AF_INET,"httpbin.org")!=1)
-                printf("DNS request err\n");
-            if(DNS_response(&sd,&ip,1)!=1)
-                printf("DNS response err\n");
-            closesocket(sd);
-
-            if(ip.len){
-                inet_ntop((ip.len==4?AF_INET:AF_INET6),ip.ip,str,32);
-                printf("ip:%s\n",str);
-                memset(&a,0,sizeof(a));
-                a.sin_family=AF_INET; a.sin_port=80; b2net(&a.sin_port);
-                memcpy(&a.sin_addr,ip.ip,ip.len);
-            }else m.state=-1;
-        }
-
-        while(m.state!=-1){
+        int ret=0;
+        while(!ret){
             unsigned int sleepcnt=0;
             while(m.wait){sleepf(0.1); printf("\r... wait %f sec",++sleepcnt*0.1); fflush(stdout);}
             printf("\n");
-            switch(m.state){
-                case 0:
-                    printf("state=%d\n",m.state);
-                    if(m.err==TIMEOUT){
-                        m.state=-1; printf("\tconnect timeout\n"); break;
-                    }
-                    if(connect(s,(struct sockaddr*)&a,sizeof(a))==-1 && INPROGRESS()){
-                        m.wait=1; poll_both_tm(&s,callback,&m,10); break;
-                    }
-                    printf("\tconnect\n");
-                    m.state=1;
-                case 1:{
-                    printf("state=%d\n",m.state);
-                    send(s,req,strlen(req),MSG_NOSIGNAL);
-                    m.state=2;
-                }
-                case 2:{
-                    char buf[4096];
-                    int c;
-                    if(m.err==TIMEOUT){
-                        m.state=-1; printf("\trecv timeout\n"); break;
-                    }
-                    c=recv(s,buf,sizeof(buf),0);
-                    printf("state=%d\n",m.state);
-                    printf("\trecv %d\n",c);
-                    if(c==-1){
-                        m.wait=1; poll_recv_tm(&s,callback,&m,10); break;
-                    }
-                    buf[c]=0;
-                    printf("\n\n\"%s\"\n\n",buf);
-                    m.state=-1;
-                }
-            }
+            ret=statemachine(&m);
         }
-        closesocket(s);
+        printf("%s\n",ret==1?"ok":"fail");
     }
 
     poll_unloop();
