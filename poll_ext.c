@@ -318,7 +318,6 @@ int poll_both_tm(void * const s,void(* const f)(int,void*),void * const a,const 
 
 struct _dns_header{
     unsigned short i, f, qdc, anc, nsc, arc;
-    unsigned char data[512];
 };
 
 static char *_dns_parse_request(const char *s,char *p){
@@ -338,21 +337,21 @@ static char *_dns_parse_request(const char *s,char *p){
 int DNS_request(void * const _s,const int family,const char * const host){
     if(_s && host){
         SOCKET s=*(SOCKET*)_s;
-        struct _dns_header h;
+        struct{ struct _dns_header h; unsigned char data[512]; }req;
         int st=SOCK_DGRAM;
-        char * const p=_dns_parse_request(host,(char*)h.data);
+        char * const p=_dns_parse_request(host,(char*)req.data);
         if(_poll_getopt(s,SO_TYPE,&st,sizeof(st))==SOCKET_ERROR)
             return SOCKET_ERROR;
         if(p){
             struct tmp{char _[4];};
             union{unsigned short x[2]; struct tmp c;} u={{0,1}};
-            const unsigned short l=(size_t)(p-(char*)&h)+5;
-            unsigned short c=0,i,af[2];
-            b2net(&u.x[1]);
-            h.i=0xdb42; b2net(&h.i);
-            h.f=0x0100; b2net(&h.f);
-            h.qdc=1; b2net(&h.qdc);
-            h.anc=h.nsc=h.arc=0;
+            const unsigned short l=(size_t)(p-(char*)&req)+5;
+            unsigned short c=0,i,af[2], nl=l;
+            b2net(&u.x[1]); b2net(&nl);
+            req.h.i=0xdb42; b2net(&req.h.i);
+            req.h.f=0x0100; b2net(&req.h.f);
+            req.h.qdc=1; b2net(&req.h.qdc);
+            req.h.anc=req.h.nsc=req.h.arc=0;
             if(family==AF_INET){i=1; af[0]=1;}
 #ifdef AF_INET6
             else if(family==AF_INET6){i=1; af[0]=28;}
@@ -365,7 +364,7 @@ int DNS_request(void * const _s,const int family,const char * const host){
             while(i){
                 u.x[0]=af[--i]; b2net(&u.x[0]);
                 *((struct tmp*)(p+1))=u.c;
-                c+=(st==SOCK_DGRAM || send(s,&l,2,MSG_NOSIGNAL)==2) && (send(s,(const char*)&h,l,MSG_NOSIGNAL)==l);
+                c+=(st==SOCK_DGRAM || send(s,&nl,2,MSG_NOSIGNAL)==2) && (send(s,(const char*)&req,l,MSG_NOSIGNAL)==l);
             }
             return c;
         }
@@ -378,7 +377,7 @@ static int _dns_parse_answer(struct _dns_header * const h,struct DNS_addr * cons
     unsigned int count=0;
     b2host(&h->i); b2host(&h->f);
     if(h->i==0xdb42 && !(h->f & 15) && h->anc){
-        const unsigned char *p=h->data;
+        const unsigned char *p=(const unsigned char*)(h+1);
         unsigned int i; b2host(&h->qdc); b2host(&h->anc);
         for(i=h->qdc;i;--i,p+=5)
             while(*p) p+=(*p)+1;
@@ -403,20 +402,21 @@ static int _dns_parse_answer(struct _dns_header * const h,struct DNS_addr * cons
 
 int DNS_response(void * const _s,struct DNS_addr * const a,const unsigned int size){
     if(_s && a){
-        struct _dns_header h;
+        struct{ struct _dns_header h; unsigned char data[1024*8]; }res;
         SOCKET s=*(SOCKET*)_s;
-        int st=SOCK_DGRAM, bytes=sizeof(h);
+        int st=SOCK_DGRAM, bytes=sizeof(res);
         if(_poll_getopt(s,SO_TYPE,&st,sizeof(st))==SOCKET_ERROR)
             return SOCKET_ERROR;
         if(st!=SOCK_DGRAM){
             unsigned short sz;
             bytes=recv(s,(char*)&sz,2,MSG_NOSIGNAL);
             if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
+            if(bytes<2){WSASetLastError(-1); return 0;}
             b2host(&sz); bytes=sz;
         }
-        bytes=recv(s,(char*)&h,bytes,MSG_NOSIGNAL);
+        bytes=recv(s,(char*)&res,bytes,MSG_NOSIGNAL);
         if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
-        if(bytes>11) return _dns_parse_answer(&h,a,size);
+        if(bytes>11) return _dns_parse_answer(&res.h,a,size);
         WSASetLastError(-1); return 0;
     }else WSASetLastError(WSAEINVAL);
     return SOCKET_ERROR;
