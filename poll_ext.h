@@ -18,7 +18,7 @@ typedef struct{
     void(*mutex)(int cmd); /* cmd: 0 - unlock, 1 - lock */
     void *iarg;
     unsigned int reserv; /* default: 192 on stack */
-    unsigned int wsa;
+    int WSA; /* for Winapi only: 0 -> (2,2), -1 -> no use */
 }poll_config_t;
 
 void poll_loop(poll_config_t *cfg);

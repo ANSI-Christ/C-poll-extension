@@ -23,8 +23,13 @@
 
 static int _poll_startup(int ver){
     WSADATA w;
+    if(ver==-1) return 1;
     if(!ver) ver=MAKEWORD(2,2);
     return !WSAStartup(ver,&w);
+}
+
+static void _poll_cleanup(const int ver){
+    if(ver!=-1) WSACleanup();
 }
 
 #define _poll_setopt(_s_,_o_,_p_,_l_) setsockopt((_s_),SOL_SOCKET,(_o_),(const char*)(_p_),(_l_))
@@ -83,7 +88,6 @@ typedef int SOCKET;
 #define closesocket close
 #define WSASetLastError(_1_) (errno=(_1_))
 #define WSAGetLastError() (errno)
-#define WSACleanup() while(0)
 #define WSAPoll poll
 #define WSAEINTR EINTR
 #define WSAEBADF EBADF
@@ -95,6 +99,7 @@ typedef int SOCKET;
 #define WSAELOOP ENXIO
 #define SD_BOTH SHUT_RDWR
 #define _poll_startup(ver) (1)
+#define _poll_cleanup(ver) while(0)
 
 #define _poll_setopt(_s_,_o_,_p_,_l_) setsockopt((_s_),SOL_SOCKET,(_o_),(_p_),(_l_))
 static int _poll_getopt(SOCKET s,const int o,void * const p,const unsigned int l){
@@ -217,12 +222,13 @@ void poll_loop(poll_config_t * const cfg){
     void(* const mtx)(int)=((cfg && cfg->mutex) ? cfg->mutex : _poll_mtx);
     struct pollfd fd_stack[192], *fd=fd_stack;
     struct pollcb cb_stack[192], *cb=cb_stack;
+    const int wsa=cfg ? cfg->WSA : 0;
     unsigned int t=0, size=192, count=1;
     int err=0;
 
     mtx(1);
     if(++g->count==1){
-        if(_poll_startup(cfg ? cfg->wsa : 0) && _poll_pipe(&g->ctrl)){
+        if(_poll_startup(wsa) && _poll_pipe(&g->ctrl)){
             #ifdef SO_NOSIGPIPE
             const int opt=1;
             _poll_setopt(g->ctrl.r,SO_NOSIGPIPE,&opt,sizeof(opt));
@@ -318,7 +324,7 @@ _mark:
             closesocket(g->ctrl.r);
             g->ctrl.r=INVALID_SOCKET;
         }
-        WSACleanup();
+        _poll_cleanup(wsa);
     }
     mtx(0);
 }
