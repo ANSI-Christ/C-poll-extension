@@ -73,14 +73,16 @@ int socket_unblock(void * const s){
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 
 typedef int SOCKET;
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR   -1
-#define WSAGetLastError() (errno)
-#define WSASetLastError(_1_) (errno=(_1_))
 #define closesocket close
+#define WSASetLastError(_1_) (errno=(_1_))
+#define WSAGetLastError() (errno)
 #define WSACleanup() while(0)
 #define WSAPoll poll
 #define WSAEINTR EINTR
@@ -110,8 +112,51 @@ int socket_unblock(void * const _s){
 #endif
 
 #ifndef MSG_NOSIGNAL
-    #define MSG_NOSIGNAL 0
+#define MSG_NOSIGNAL 0
 #endif
+
+#ifndef POLLIN
+#define POLLIN 1
+#define POLLOUT 2
+#define POLLERR 4
+#define POLLNVAL 8
+#define POLLHUP 16
+struct pollfd{
+    SOCKET fd;
+    short events, revents;
+};
+static int WSAPoll(struct pollfd * const p,const int cnt,const int timeout){
+    struct timeval t={timeout/1000,1000*(timeout%1000)};
+    int i,s,c;
+    SOCKET max=p->fd;
+    fd_set set[3];
+    FD_ZERO(set);FD_ZERO(set+1);FD_ZERO(set+2);
+    for(i=0;i<cnt;++i){
+        p[i].revents=0;
+        if(p[i].events & POLLIN) FD_SET(p[i].fd,set);
+        if(p[i].events & POLLOUT) FD_SET(p[i].fd,set+1);
+        FD_SET(p[i].fd,set+2);
+#ifdef _WIN32
+#define _POLL_BY_SELECT 1
+#else
+#define _POLL_BY_SELECT 2
+        if(p[i].fd>max) max=p[i].fd;
+#endif
+    }
+    if((s=select(max+1,set,set+1,set+2,timeout<0?NULL:&t))!=SOCKET_ERROR)
+        for(c=s,i=s=0;c && i<cnt;++i){
+            unsigned char e=0;
+            if(FD_ISSET(p[i].fd,set+0)){--c; e=1; p[i].revents|=POLLIN;}
+            if(FD_ISSET(p[i].fd,set+1)){--c; e=1; p[i].revents|=POLLOUT;}
+            if(FD_ISSET(p[i].fd,set+2)){--c; e=1; p[i].revents|=POLLERR;}
+            s+=e;
+        }
+    return s;
+}
+#else
+#define _POLL_BY_SELECT 0
+#endif
+
 
 struct pollcb{
     void(*f)(int,void*);
@@ -223,10 +268,15 @@ _mark:
                     }
                 }
                 if(count<size){
-                    fd[count]=cmd.fd;
-                    cb[count]=cmd.cb;
-                    t+=(cmd.cb.t!=0);
-                    ++count;
+                    #if _POLL_BY_SELECT
+                    if(count>=FD_SETSIZE) cmd.cb.f(WSAENOBUFS,cmd.cb.a); else
+                    #endif
+                    do{
+                        fd[count]=cmd.fd;
+                        cb[count]=cmd.cb;
+                        t+=(cmd.cb.t!=0);
+                        ++count;
+                    }while(0);
                 }
                 if(repeat && WSAPoll(fd,1,0)>0){
                     --repeat; goto _mark;
@@ -286,6 +336,9 @@ static int _poll_add(void * const s,const short e,void(* const f)(int,void*),voi
     struct _poll_glob * const g=_poll_glob;
     if(g->ctrl.r==INVALID_SOCKET){WSASetLastError(WSAELOOP); return SOCKET_ERROR;}
     if(!s || *(SOCKET*)s==INVALID_SOCKET || !f || !a){WSASetLastError(WSAEINVAL); return SOCKET_ERROR;}
+    #if _POLL_BY_SELECT==2
+    if(*(SOCKET*)s>=FD_SETSIZE){WSASetLastError(WSAEBADF); return SOCKET_ERROR;}
+    #endif
     {struct pollcmd cmd={{f,a,t},{*(SOCKET*)s,e,0},0};
     return _poll_setcmd(g->ctrl.w,&cmd);}
 }
