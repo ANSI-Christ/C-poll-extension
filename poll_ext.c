@@ -218,15 +218,17 @@ void poll_loop(poll_config_t * const cfg){
     struct pollfd fd_stack[192], *fd=fd_stack;
     struct pollcb cb_stack[192], *cb=cb_stack;
     unsigned int t=0, size=192, count=1;
-    int run=-1;
+    int err=0;
 
     mtx(1);
-    if(++g->count==1 && _poll_startup(cfg ? cfg->wsa : 0) && _poll_pipe(&g->ctrl)){
-        #ifdef SO_NOSIGPIPE
-        const int opt=1;
-        _poll_setopt(g->ctrl.r,SO_NOSIGPIPE,&opt,sizeof(opt));
-        _poll_setopt(g->ctrl.w,SO_NOSIGPIPE,&opt,sizeof(opt));
-        #endif
+    if(++g->count==1){
+        if(_poll_startup(cfg ? cfg->wsa : 0) && _poll_pipe(&g->ctrl)){
+            #ifdef SO_NOSIGPIPE
+            const int opt=1;
+            _poll_setopt(g->ctrl.r,SO_NOSIGPIPE,&opt,sizeof(opt));
+            _poll_setopt(g->ctrl.w,SO_NOSIGPIPE,&opt,sizeof(opt));
+            #endif
+        }else err=WSAGetLastError();
     }
     mtx(0);
 
@@ -234,16 +236,17 @@ void poll_loop(poll_config_t * const cfg){
         size=cfg->reserv;
         fd=(struct pollfd*)allocator(sizeof(*fd)*size);
         cb=(struct pollcb*)allocator(sizeof(*cb)*size);
+        if(!fd || !cb) err=WSAENOBUFS;
     }
-    if(fd && cb && g->ctrl.r!=INVALID_SOCKET){
+    if(!err){
         fd->fd=g->ctrl.r;
         fd->events=POLLIN;
         fd->revents=0;
-        run=1;
     }
-    if(cfg) cfg->get_result=run;
+    if(cfg && cfg->init)
+        cfg->init(err,cfg->iarg);
 
-    while(run==1){
+    while(!err){
         const int _c=WSAPoll(fd,count,(t?1000:-1));
         unsigned int repeat=20, i=count, c=((_c!=SOCKET_ERROR)?_c:0);
 
@@ -281,7 +284,7 @@ _mark:
                 if(repeat && WSAPoll(fd,1,0)>0){
                     --repeat; goto _mark;
                 }
-            }else run=0;
+            }else err=-1;
         }
 
         while((c|t) && --i){

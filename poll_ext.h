@@ -13,11 +13,12 @@
 typedef struct{
     void*(*allocator)(size_t size);
     void(*deallocator)(void *ptr);
+    void(*init)(int err,void *arg);
     size_t(*increase)(size_t old_size);
     void(*mutex)(int cmd); /* cmd: 0 - unlock, 1 - lock */
+    void *iarg;
     unsigned int reserv; /* default: 192 on stack */
     unsigned int wsa;
-    int get_result; /* sets -1 on error and 1 on success*/
 }poll_config_t;
 
 void poll_loop(poll_config_t *cfg);

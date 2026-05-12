@@ -38,18 +38,28 @@ static void callback(int err,void *arg){
 
 #endif
 
+static void on_init(int err,void *arg){
+    int *x=(int*)arg;
+    x[1]=err; x[0]=0;
+}
+
 int main(){
     pthread_t t[3];
     int i,N=sizeof(t)/sizeof(*t);
     poll_config_t cfg={
         .mutex=gmtx,
+        .init=on_init
     };
 
     for(i=0;i<N;++i){
-        cfg.get_result=0;
+        int sync[2]={1,0};
+        cfg.iarg=sync;
         if(pthread_create(t+i,NULL,(void*(*)(void*))poll_loop,&cfg)) break;
-        while(!cfg.get_result) sleepf(0.01);
-        if(cfg.get_result==-1) break;
+        while(sync[0]) sleepf(0.01);
+        if(sync[1]){
+            printf("loop error %d\n",sync[1]);
+            break;
+        }
     }
 
     if( (N=i) ){
