@@ -417,7 +417,7 @@ int DNS_request(void * const _s,const int family,const char * const host){
             while(i){
                 u.x[0]=af[--i]; b2net(&u.x[0]);
                 *((struct tmp*)(p+1))=u.c;
-                c+=(st==SOCK_DGRAM || send(s,&nl,2,MSG_NOSIGNAL)==2) && (send(s,(const char*)&req,l,MSG_NOSIGNAL)==l);
+                c+=(st==SOCK_DGRAM || send(s,(const char*)&nl,2,MSG_NOSIGNAL)==2) && (send(s,(const char*)&req,l,MSG_NOSIGNAL)==l);
             }
             return c;
         }
