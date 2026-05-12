@@ -37,16 +37,13 @@ int poll_both_tm(void *os_socket,void(*callback)(int err,void *arg),void *arg,un
 
 /* usefull helpers */
 
-struct DNS_response{
-    unsigned char count;
-    struct{
-        unsigned char len;
-        unsigned char addr[16];
-    }ip[16];
+struct DNS_addr{
+    unsigned char len; /* [4,16] */
+    unsigned char ip[16];
 };
 
-int DNS_request(const char *dns_ipv4,int family,const char *host_name,void *out_socket);
-int DNS_response(void *request_socket,struct DNS_response *response);
+int DNS_request(void *os_socket,int family,const char *host_name);
+int DNS_response(void *os_socket,struct DNS_addr *buffer,unsigned int size);
 
 int socket_unblock(void *os_socket);
 

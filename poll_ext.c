@@ -71,8 +71,9 @@ int socket_unblock(void * const s){
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <netinet/in.h>
+#include <sys/types.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 
 typedef int SOCKET;
 #define INVALID_SOCKET -1
@@ -88,6 +89,7 @@ typedef int SOCKET;
 #define WSAENOBUFS ENOMEM
 #define WSAEMSGSIZE EMSGSIZE
 #define WSAETIMEDOUT ETIMEDOUT
+#define WSAEAFNOSUPPORT EAFNOSUPPORT
 #define WSAELOOP ENXIO
 #define SD_BOTH SHUT_RDWR
 #define _poll_startup(ver) (1)
@@ -319,77 +321,64 @@ struct _dns_header{
     unsigned char data[512];
 };
 
-static int _dns_parse(const char * const s,char * const p){
-    unsigned int a,b,c,d;
-    if(sscanf(s,"%u.%u.%u.%u",&a,&b,&c,&d)!=4 || a>255 || b>255 || c>255 || d>255)
-        return 0;
-    p[0]=a; p[1]=b; p[2]=c; p[3]=d; return 1;
-}
-
-static char *_dns_host_encode(const char *s,char *p){
-    char x=*s;
+static char *_dns_parse_request(const char *s,char *p){
+    unsigned int b=0; char x=*s;
     while(x){
         char * const c=p;
-        do{*(++p)=*(s++);}while(*p && *p!='.');
-        {const size_t l=(size_t)(p-c)-1; if(l>63){return NULL;} *c=l;} x=*p;
+        unsigned int l=0;
+        do{
+            *(++p)=*(s++);
+            if(++b==512 || ++l==64) return NULL;
+        }while(*p && *p!='.');
+        *c=l-1; x=*p;
     } *p=0;
     return p;
 }
 
-static int _dns_make_request(SOCKET s,const int af,const char * const host){
-    struct _dns_header h;
-    char * const p=_dns_host_encode(host,(char*)h.data);
-    if(p){
-        struct tmp{char _[4];};
-        union{unsigned short x[2]; struct tmp c;} u={{(af==AF_INET)?1:28,1}};
-        const unsigned int l=(size_t)(p-(char*)&h)+5;
-        b2net(&u.x[0]); b2net(&u.x[1]);
-        h.i=0xdb42; b2net(&h.i);
-        h.f=0x0100; b2net(&h.f);
-        h.qdc=1; b2net(&h.qdc);
-        h.anc=h.nsc=h.arc=0;
-        *((struct tmp*)(p+1))=u.c;
-        return send(s,(const char*)&h,l,MSG_NOSIGNAL)==l;
-    }
-    return 0;
-}
+int DNS_request(void * const s,const int family,const char * const host){
+    if(s && host){
+        struct _dns_header h;
+        char * const p=_dns_parse_request(host,(char*)h.data);
+        if(p){
+            struct tmp{char _[4];};
+            union{unsigned short x[2]; struct tmp c;} u={{0,1}};
+            const unsigned int l=(size_t)(p-(char*)&h)+5;
+            unsigned short c=0,i,af[2];
+            b2net(&u.x[1]);
+            h.i=0xdb42; b2net(&h.i);
+            h.f=0x0100; b2net(&h.f);
+            h.qdc=1; b2net(&h.qdc);
+            h.anc=h.nsc=h.arc=0;
+            if(family==AF_INET){i=1; af[0]=1;}
+#ifdef AF_INET6
+            else if(family==AF_INET6){i=1; af[0]=28;}
+#endif
+#ifdef AF_UNSPEC
+            else if(family==AF_UNSPEC){i=1; af[0]=28; af[1]=1;}
+#endif
+            else{WSASetLastError(WSAEAFNOSUPPORT); return SOCKET_ERROR;}
 
-int DNS_request(const char * dns,const int family,const char * const host,void * const out_socket){
-    if(host && out_socket){
-        struct sockaddr_in a; memset(&a,0,sizeof(a));
-        if(!dns) dns="8.8.8.8";
-        if(_dns_parse(dns,(char*)&a.sin_addr)){
-            SOCKET s=socket(AF_INET,SOCK_DGRAM,0);
-            if(s!=INVALID_SOCKET){
-                a.sin_family=AF_INET;
-                a.sin_port=53; b2net(&a.sin_port);
-                connect(s,(struct sockaddr*)&a,sizeof(a));
-                if(_dns_make_request(s,family,host)){
-                    *(SOCKET*)out_socket=s;
-                    return 0;
-                }
-                closesocket(s);
+            while(i){
+                u.x[0]=af[--i]; b2net(&u.x[0]);
+                *((struct tmp*)(p+1))=u.c;
+                c+=(send(*(SOCKET*)s,(const char*)&h,l,MSG_NOSIGNAL)==l);
             }
+            return c;
         }
     }
     WSASetLastError(WSAEINVAL);
-    *(SOCKET*)out_socket=INVALID_SOCKET;
     return SOCKET_ERROR;
 }
 
-int DNS_response(void * const s,struct DNS_response * const a){
-    struct _dns_header h;
-    const int bytes=recv(*(SOCKET*)s,(char*)&h,sizeof(h),MSG_NOSIGNAL);
-    closesocket(*(SOCKET*)s);
-    a->count=0;
-    if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
-    b2host(&h.i); b2host(&h.f);
-    if(bytes>11 && h.i==0xdb42 && !(h.f & 15) && h.anc){
-        const unsigned char *p=h.data;
-        unsigned int i; b2host(&h.qdc); b2host(&h.anc);
-        for(i=h.qdc;i;--i,p+=5)
+static int _dns_parse_answer(struct _dns_header * const h,struct DNS_addr * const a,const unsigned int size){
+    unsigned int count=0;
+    b2host(&h->i); b2host(&h->f);
+    if(h->i==0xdb42 && !(h->f & 15) && h->anc){
+        const unsigned char *p=h->data;
+        unsigned int i; b2host(&h->qdc); b2host(&h->anc);
+        for(i=h->qdc;i;--i,p+=5)
             while(*p) p+=(*p)+1;
-        for(i=h.anc;i && a->count<(sizeof(a->ip)/sizeof(*a->ip));--i){
+        for(i=h->anc;i && count<size;--i){
             if((*p & 0xC0)==0xC0) ++p;
             else while(*p) p+=(*p)+1;
             {union addr{
@@ -399,13 +388,22 @@ int DNS_response(void * const s,struct DNS_response * const a){
             b2host(&addr.ip.t);
             b2host(&addr.ip.l);
             if((addr.ip.t==1 && addr.ip.l==4) || (addr.ip.t==28 && addr.ip.l==16)){
-                memcpy(a->ip[a->count].addr,p,(a->ip[a->count].len=addr.ip.l));
-                ++a->count;
+                memcpy(a[count].ip,p,(a[count].len=addr.ip.l));
+                ++count;
             }
             p+=addr.ip.l;}
         }
-        return 0;
     }
-    WSASetLastError(-1);
+    return count;
+}
+
+int DNS_response(void * const s,struct DNS_addr * const a,const unsigned int size){
+    if(s && a){
+        struct _dns_header h;
+        const int bytes=recv(*(SOCKET*)s,(char*)&h,sizeof(h),MSG_NOSIGNAL);
+        if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
+        if(bytes>11) return _dns_parse_answer(&h,a,size);
+        WSASetLastError(-1); return 0;
+    }else WSASetLastError(WSAEINVAL);
     return SOCKET_ERROR;
 }

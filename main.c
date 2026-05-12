@@ -59,22 +59,31 @@ int main(){
         SOCKET s=socket(AF_INET,SOCK_STREAM,0);
         socket_unblock(&s);
 
-        memset(&a,0,sizeof(a));
+
         {
-            SOCKET s;
-            struct DNS_response r;
-            if(DNS_request(NULL,AF_INET,"httpbin.org",&s))
+            SOCKET sd=socket(AF_INET,SOCK_DGRAM,0);
+            struct sockaddr_in ad;
+            struct DNS_addr ip={0};
+            char str[32];
+
+            memset(&ad,0,sizeof(ad));
+            ad.sin_family=AF_INET; ad.sin_port=53; b2net(&ad.sin_port);
+            ad.sin_addr.s_addr=0x08080808; b2net(&ad.sin_addr.s_addr); /* 8.8.8.8 */
+            connect(sd,(struct sockaddr*)&ad,sizeof(ad));
+
+            if(DNS_request(&sd,AF_INET,"httpbin.org")!=1)
                 printf("DNS request err\n");
-            if(DNS_response(&s,&r))
+            if(DNS_response(&sd,&ip,1)!=1)
                 printf("DNS response err\n");
-            for(i=0;i<r.count;++i){
-                const int af=(r.ip[i].len==4?AF_INET:AF_INET6);
-                char str[32];
-                inet_ntop(af,r.ip[i].addr,str,32);
-                printf("[%u]: %s\n",i,str);
-            }
-            a.sin_family=AF_INET; a.sin_port=80; b2net(&a.sin_port);
-            memcpy(&a.sin_addr,r.ip[0].addr,r.ip[0].len);
+            closesocket(sd);
+
+            if(ip.len){
+                inet_ntop((ip.len==4?AF_INET:AF_INET6),ip.ip,str,32);
+                printf("ip:%s\n",str);
+                memset(&a,0,sizeof(a));
+                a.sin_family=AF_INET; a.sin_port=80; b2net(&a.sin_port);
+                memcpy(&a.sin_addr,ip.ip,ip.len);
+            }else m.state=-1;
         }
 
         while(m.state!=-1){
