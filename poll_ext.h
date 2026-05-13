@@ -59,7 +59,7 @@ void b2host(void *base_type_address);
 
 #define b2net b2host
 #define b2host(_p_) do{\
-    struct static_assert_bad_type_##__LINE__{char _1[(sizeof((_p_)[0]<9)) ? 1 : -1], _2[sizeof((_p_)[0]+=0.1)];};\
+    struct static_assert_bad_type{char _1[(sizeof((_p_)[0]<9)) ? 1 : -1], _2[sizeof((_p_)[0]+=0.1)];};\
     if(sizeof(long)!=1){\
         const union{long _; struct{char ltl,pdp;}v;}_e_={1};\
         if(_e_.v.ltl)\
