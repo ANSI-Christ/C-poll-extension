@@ -86,17 +86,17 @@ typedef int SOCKET;
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR   -1
 #define closesocket close
-#define WSASetLastError(_1_) (errno=(_1_))
+#define WSASetLastError(_1_) do{errno=(_1_);}while(0)
 #define WSAGetLastError() (errno)
 #define WSAPoll poll
+#define WSAELOOP ELOOP
 #define WSAEINTR EINTR
 #define WSAEBADF EBADF
 #define WSAEINVAL EINVAL
-#define WSAENOBUFS ENOMEM
+#define WSAENOBUFS ENOBUFS
 #define WSAEMSGSIZE EMSGSIZE
 #define WSAETIMEDOUT ETIMEDOUT
 #define WSAEAFNOSUPPORT EAFNOSUPPORT
-#define WSAELOOP ENXIO
 #define SD_BOTH SHUT_RDWR
 #define _poll_startup(ver) (1)
 #define _poll_cleanup(ver) while(0)
@@ -115,6 +115,8 @@ int socket_unblock(void * const _s){
 }
 
 #endif
+
+#define _WSAEUNKNOWN -1
 
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
@@ -346,7 +348,7 @@ static int _poll_add(void * const s,const short e,void(* const f)(int,void*),voi
     if(g->ctrl.r==INVALID_SOCKET){WSASetLastError(WSAELOOP); return SOCKET_ERROR;}
     if(!s || *(SOCKET*)s==INVALID_SOCKET || !f || !a){WSASetLastError(WSAEINVAL); return SOCKET_ERROR;}
     #if _POLL_BY_SELECT==2
-    if(*(SOCKET*)s>=FD_SETSIZE){WSASetLastError(WSAEBADF); return SOCKET_ERROR;}
+    if(*(SOCKET*)s>=FD_SETSIZE){WSASetLastError(WSAENOBUFS); return SOCKET_ERROR;}
     #endif
     {struct pollcmd cmd={{f,a,t},{*(SOCKET*)s,e,0},0};
     return _poll_setcmd(g->ctrl.w,&cmd);}
@@ -435,7 +437,7 @@ int DNS_request(void * const _s,const int family,const char * const host){
     return SOCKET_ERROR;
 }
 
-static int _dns_parse_answer(struct _dns_header * const h,struct DNS_addr * const a,const unsigned int size){
+static int _dns_parse_answer(struct _dns_header * const h,struct netaddr * const a,const unsigned int size){
     unsigned int count=0;
     b2host(&h->i); b2host(&h->f);
     if(h->i==0xdb42 && !(h->f & 15) && h->anc){
@@ -462,7 +464,7 @@ static int _dns_parse_answer(struct _dns_header * const h,struct DNS_addr * cons
     return count;
 }
 
-int DNS_response(void * const _s,struct DNS_addr * const a,const unsigned int size){
+int DNS_response(void * const _s,struct netaddr * const a,const unsigned int size){
     if(_s && a){
         struct{ struct _dns_header h; unsigned char data[1024*8]; }res;
         SOCKET s=*(SOCKET*)_s;
@@ -473,13 +475,13 @@ int DNS_response(void * const _s,struct DNS_addr * const a,const unsigned int si
             unsigned short sz;
             bytes=recv(s,(char*)&sz,2,MSG_NOSIGNAL);
             if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
-            if(bytes<2){WSASetLastError(-1); return 0;}
+            if(bytes<2){WSASetLastError(_WSAEUNKNOWN); return 0;}
             b2host(&sz); bytes=sz;
         }
         bytes=recv(s,(char*)&res,bytes,MSG_NOSIGNAL);
         if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
         if(bytes>11) return _dns_parse_answer(&res.h,a,size);
-        WSASetLastError(-1); return 0;
+        WSASetLastError(_WSAEUNKNOWN); return 0;
     }else WSASetLastError(WSAEINVAL);
     return SOCKET_ERROR;
 }

@@ -65,7 +65,7 @@ int statemachine(struct statemachine * const m){
         }
         case 1:{
             struct sockaddr_in a;
-            struct DNS_addr ip;
+            struct netaddr ip;
             printf("state=%d\n",m->state);
             if(DNS_response(&m->s,&ip,1)!=1){
                 closesocket(m->s);

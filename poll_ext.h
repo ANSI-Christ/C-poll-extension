@@ -38,13 +38,13 @@ int poll_both_tm(void *os_socket,void(*callback)(int err,void *arg),void *arg,un
 
 /* usefull helpers */
 
-struct DNS_addr{
+struct netaddr{
     unsigned char len; /* [4,16] */
     unsigned char ip[16];
 };
 
 int DNS_request(void *os_socket,int family,const char *host_name);
-int DNS_response(void *os_socket,struct DNS_addr *buffer,unsigned int size);
+int DNS_response(void *os_socket,struct netaddr *buffer,unsigned int size);
 
 int socket_unblock(void *os_socket);
 
