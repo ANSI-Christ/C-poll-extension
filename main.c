@@ -5,6 +5,7 @@
 #include "poll_ext.c"
 
 #ifdef _WIN32
+#include <ws2tcpip.h>
     #define TIMEOUT WSAETIMEDOUT
 #else
 #include <netinet/in.h>

@@ -18,7 +18,6 @@
 
 #define NOMINMAX
 #include <winsock2.h>
-#include <ws2tcpip.h>
 #undef NOMINMAX
 
 static int _poll_startup(int ver){
