@@ -7,6 +7,7 @@
 #ifdef _WIN32
     #define TIMEOUT WSAETIMEDOUT
 #else
+#include <netinet/in.h>
     #define TIMEOUT ETIMEDOUT
 #endif
 
@@ -51,8 +52,8 @@ int statemachine(struct statemachine * const m){
 
             memset(&a,0,sizeof(a));
             a.sin_family=AF_INET;
-            a.sin_port=53; b2net(&a.sin_port);
-            a.sin_addr.s_addr=0x08080808; b2net(&a.sin_addr.s_addr); /* 8.8.8.8 */
+            a.sin_port=53; d2net(&a.sin_port);
+            a.sin_addr.s_addr=0x08080808; d2net(&a.sin_addr.s_addr); /* 8.8.8.8 */
             connect(m->s,(struct sockaddr*)&a,sizeof(a));
 
             if(DNS_request(&m->s,AF_INET,"httpbin.org")!=1){
@@ -75,7 +76,7 @@ int statemachine(struct statemachine * const m){
 
             memset(&a,0,sizeof(a));
             a.sin_family=AF_INET;
-            a.sin_port=80; b2net(&a.sin_port);
+            a.sin_port=80; d2net(&a.sin_port);
             memcpy(&a.sin_addr,ip.ip,ip.len);
 
             closesocket(m->s);

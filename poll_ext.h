@@ -48,8 +48,8 @@ int DNS_response(void *os_socket,struct netaddr *buffer,unsigned int size);
 
 int socket_unblock(void *os_socket);
 
-void b2net(void *base_type_address);
-void b2host(void *base_type_address);
+void d2net(void *base_type_address);
+void d2host(void *base_type_address);
 
 
 
@@ -57,8 +57,8 @@ void b2host(void *base_type_address);
 
 /* macro detail */
 
-#define b2net b2host
-#define b2host(_p_) do{\
+#define d2net d2host
+#define d2host(_p_) do{\
     struct static_assert_bad_type{char _1[(sizeof((_p_)[0]<9)) ? 1 : -1], _2[sizeof((_p_)[0]+=0.1)];};\
     if(sizeof(long)!=1){\
         const union{long _; struct{char ltl,pdp;}v;}_e_={1};\
