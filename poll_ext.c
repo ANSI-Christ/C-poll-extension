@@ -174,7 +174,8 @@ struct pollcb{
 
 struct pollcmd{
     struct pollcb cb;
-    struct pollfd fd;
+    SOCKET fd;
+    short ev;
     char size;
 };
 
@@ -283,8 +284,10 @@ _mark:
                     if(count>=FD_SETSIZE) cmd.cb.f(WSAENOBUFS,cmd.cb.a); else
                     #endif
                     do{
-                        fd[count]=cmd.fd;
                         cb[count]=cmd.cb;
+                        fd[count].fd=cmd.fd;
+                        fd[count].events=cmd.ev;
+                        fd[count].revents=0;
                         t+=(cmd.cb.t!=0);
                         ++count;
                     }while(0);
@@ -333,24 +336,17 @@ _mark:
 
 void poll_unloop(void){
     struct _poll_ctrl * const g=_poll_ctrl;
-    if(g->r!=INVALID_SOCKET){
-        struct pollfd fd[1]={{g->r,POLLIN,0}};
-        struct pollcmd cmd;
-        shutdown(g->w,SD_BOTH);
-        while(WSAPoll(fd,1,0)>0 && _poll_getcmd(fd->fd,&cmd))
-            cmd.cb.f(WSAELOOP,cmd.cb.a);
-        shutdown(g->r,SD_BOTH);
-    }
+    if(g->r!=INVALID_SOCKET) shutdown(g->w,SD_BOTH);
 }
 
-static int _poll_add(void * const s,const short e,void(* const f)(int,void*),void * const a,const time_t t){
+static int _poll_add(void * const s,const int e,void(* const f)(int,void*),void * const a,const time_t t){
     struct _poll_ctrl * const g=_poll_ctrl;
     if(g->r==INVALID_SOCKET){WSASetLastError(WSAELOOP); return SOCKET_ERROR;}
     if(!s || *(SOCKET*)s==INVALID_SOCKET || !f || !a){WSASetLastError(WSAEINVAL); return SOCKET_ERROR;}
     #if _POLL_BY_SELECT==2
     if(*(SOCKET*)s>=FD_SETSIZE){WSASetLastError(WSAENOBUFS); return SOCKET_ERROR;}
     #endif
-    {struct pollcmd cmd={{f,a,t},{*(SOCKET*)s,e,0},0};
+    {struct pollcmd cmd={{f,a,t},*(SOCKET*)s,e,0};
     return _poll_setcmd(g->w,&cmd);}
 }
 
