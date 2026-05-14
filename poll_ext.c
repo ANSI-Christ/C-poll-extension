@@ -42,15 +42,13 @@ static int _poll_pipe(void * const s){
     int len=sizeof(addr);
     unsigned char * const ip=(unsigned char*)&addr.sin_addr;
     memset(&addr,0,sizeof(addr));
-    addr.sin_family=AF_INET; addr.sin_port=0;
-    ip[0]=127; ip[1]=ip[2]=0; ip[3]=1;
+    addr.sin_family=AF_INET;
+    addr.sin_port=0; ip[0]=127; ip[3]=1;
     if( (l=socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET )
         goto _clean1;
-    if(bind(l,(struct sockaddr*)&addr,len)==SOCKET_ERROR || listen(l,1)==SOCKET_ERROR)
+    if( bind(l,(struct sockaddr*)&addr,len)==SOCKET_ERROR || listen(l,1)==SOCKET_ERROR || (w=socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET )
         goto _clean2;
-    if( (w=socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET)
-        goto _clean2;
-    if( getsockname(l,(struct sockaddr*)&addr,&len) || connect(w,(struct sockaddr*)&addr,len)==SOCKET_ERROR || (r=accept(l,NULL,NULL))==INVALID_SOCKET)
+    if( getsockname(l,(struct sockaddr*)&addr,&len) || connect(w,(struct sockaddr*)&addr,len)==SOCKET_ERROR || (r=accept(l,NULL,NULL))==INVALID_SOCKET )
         goto _clean3;
     closesocket(l);
     ((SOCKET*)s)[0]=r;
@@ -94,8 +92,8 @@ typedef int SOCKET;
 #define WSAEINTR EINTR
 #define WSAEBADF EBADF
 #define WSAEINVAL EINVAL
+#define WSAEFAULT EFAULT
 #define WSAENOBUFS ENOBUFS
-#define WSAEMSGSIZE EMSGSIZE
 #define WSAETIMEDOUT ETIMEDOUT
 #define WSAEAFNOSUPPORT EAFNOSUPPORT
 #define SD_BOTH SHUT_RDWR
@@ -137,7 +135,6 @@ int error_last(void){
 #define POLLOUT 2
 #define POLLERR 4
 #define POLLNVAL 8
-#define POLLHUP 16
 struct pollfd{
     SOCKET fd;
     short events, revents;
@@ -169,6 +166,7 @@ static int WSAPoll(struct pollfd * const p,const int cnt,const int timeout){
             s+=e;
         }
     return s;
+    {char POLL_FALLBACK_SELECT[1]={0,0};}
 }
 #else
 #define _POLL_BY_SELECT 0
@@ -200,25 +198,22 @@ int _poll_socket_error(void * const s){
 }
 
 static int _poll_getcmd(SOCKET s,struct pollcmd * const cmd){
-    unsigned int l=_POLL_OFFSETOF(struct pollcmd,size);
-    char *d=(char*)cmd;
-    do{
-        const int c=recv(s,d,l,MSG_NOSIGNAL);
-        if(!c) return 0;
-        if(c!=SOCKET_ERROR){d+=c; l-=c;}
-        else if(WSAGetLastError()!=WSAEINTR) return 0;
-    }while(l);
-    return 1;
+_mark:
+    switch(recv(s,(char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL)){
+        case _POLL_OFFSETOF(struct pollcmd,size): return 1;
+        case SOCKET_ERROR: if(WSAGetLastError()==WSAEINTR) goto _mark;
+    }
+    return 0;
 }
 
 static int _poll_setcmd(SOCKET s,const struct pollcmd * const cmd){
-    while(1){
-        const int c=send(s,(const char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL);
-        if(c==_POLL_OFFSETOF(struct pollcmd,size)) break;
-        if(c==SOCKET_ERROR && WSAGetLastError()!=WSAEINTR) return SOCKET_ERROR;
-        else if(c!=0){WSASetLastError(WSAEMSGSIZE); return SOCKET_ERROR;}
+_mark:
+    switch(send(s,(const char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL)){
+        case _POLL_OFFSETOF(struct pollcmd,size): return 0;
+        case SOCKET_ERROR: if(WSAGetLastError()!=WSAEINTR){return WSAELOOP;}
+        case 0: goto _mark;
     }
-    return 0;
+    return WSAEFAULT;
 }
 
 static void _poll_mtx(const int lock){return;if(lock)_poll_setopt(INVALID_SOCKET,0,NULL,0);}
@@ -350,13 +345,12 @@ void poll_unloop(void){
 
 static int _poll_add(void * const s,const int e,void(* const f)(int,void*),void * const a,const time_t t){
     struct _poll_ctrl * const g=_poll_ctrl;
-    if(g->r==INVALID_SOCKET){WSASetLastError(WSAELOOP); return SOCKET_ERROR;}
-    if(!s || *(SOCKET*)s==INVALID_SOCKET || !f || !a){WSASetLastError(WSAEINVAL); return SOCKET_ERROR;}
+    if(g->r==INVALID_SOCKET) return WSAELOOP;
+    if(!s || *(SOCKET*)s==INVALID_SOCKET || !f || !a) return WSAEINVAL;
     #if _POLL_BY_SELECT==2
-    if(*(SOCKET*)s>=FD_SETSIZE){WSASetLastError(WSAENOBUFS); return SOCKET_ERROR;}
+    if(*(SOCKET*)s>=FD_SETSIZE) return WSAENOBUFS;
     #endif
-    {struct pollcmd cmd={{f,a,t},*(SOCKET*)s,e,0};
-    return _poll_setcmd(g->w,&cmd);}
+    {const struct pollcmd cmd={{f,a,t},*(SOCKET*)s,e,0}; return _poll_setcmd(g->w,&cmd);}
 }
 
 int poll_recv(void * const s,void(* const f)(int,void*),void * const a){
@@ -396,7 +390,7 @@ static char *_dns_parse_request(const char *s,char *p){
         unsigned int l=0;
         do{
             *(++p)=*(s++);
-            if(++b==512 || ++l==64) return NULL;
+            if(++b==509 || ++l==64) return NULL;
         }while(*p && *p!='.');
         *c=l-1; x=*p;
     } *p=0;
