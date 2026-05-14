@@ -11,9 +11,9 @@ The library doesn't hide OS specifics or impose a usage model — you get native
 - **Minimal overhead** — just event arrays, no extra allocations
 - **Cross-platform without abstractions** — native sockets and error codes (Linux/Windows/macOS/WSL)
 - **Thread-safe registration** — add sockets from any thread via a single control channel
-- **Per-operation timeouts** — built-in `_tm` versions
+- **Per-operation timeouts** — `_tm` versions
 - **Multiple reactors support** — run several `poll_loop` instances in different threads
-- **Simplicity** — ~500 lines of code, easy to integrate
+- **Simplicity** — ~550 lines of code, easy to integrate
 - **Async code linearization** — FSM looks synchronous but doesn't block
 
 ## Link with flags:
@@ -22,3 +22,5 @@ The library doesn't hide OS specifics or impose a usage model — you get native
 
 ## Notes
  - examples are in [main.c](main.c)
+ - on Windows if WSApoll isn't exist then have auto fallback to select
+ - on UNIX if poll isn't exist then it have fallback to select by compiling with -DPOLL_BY_SELECT

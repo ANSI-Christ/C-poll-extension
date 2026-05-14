@@ -98,7 +98,7 @@ int statemachine(struct statemachine * const m){
                 printf("\tclient socket err\n");
                 return -1;
             }
-            socket_unblock(&m->s);
+            socket_mode(&m->s,0);
 
             make_addr4(NULL,80,&a,&l);
             connect(m->s,(struct sockaddr*)&a,l);

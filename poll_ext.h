@@ -46,7 +46,8 @@ struct netaddr{
 int DNS_request(void *os_socket,int family,const char *host_name);
 int DNS_response(void *os_socket,struct netaddr *buffer,unsigned int size);
 
-int socket_unblock(void *os_socket);
+int socket_mode(void *os_socket,int blocking);
+int error_last(void);
 
 void d2net(void *base_type_address);
 void d2host(void *base_type_address);

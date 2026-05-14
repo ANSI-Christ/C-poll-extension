@@ -65,8 +65,8 @@ _clean1:
 
 }
 
-int socket_unblock(void * const s){
-    u_long opt=1; return ioctlsocket(*(SOCKET*)s,FIONBIO,&opt);
+int socket_mode(void * const s,const int b){
+    u_long opt=!b; return ioctlsocket(*(SOCKET*)s,FIONBIO,&opt);
 }
 
 #else
@@ -111,11 +111,20 @@ static int _poll_pipe(void * const s){
     return socketpair(AF_UNIX,SOCK_STREAM,0,(SOCKET*)s)!=SOCKET_ERROR;
 }
 
-int socket_unblock(void * const _s){
-    SOCKET s=*(SOCKET*)_s; return fcntl(s,F_SETFL, (O_NONBLOCK | fcntl(s,F_GETFL)) );
+int socket_mode(void * const _s,const int b){
+    SOCKET s=*(SOCKET*)_s;
+    int m=fcntl(s,F_GETFL);
+    if(m==SOCKET_ERROR) return SOCKET_ERROR;
+    if(b) m&=~O_NONBLOCK;
+    else m|=O_NONBLOCK;
+    return fcntl(s,F_SETFL,m);
 }
 
 #endif
+
+int error_last(void){
+    return WSAGetLastError();
+}
 
 #define _WSAEUNKNOWN -1
 
@@ -153,7 +162,7 @@ static int WSAPoll(struct pollfd * const p,const int cnt,const int timeout){
     }
     if((s=select(max+1,set,set+1,set+2,timeout<0?NULL:&t))!=SOCKET_ERROR)
         for(c=s,i=s=0;c && i<cnt;++i){
-            unsigned char e=0;
+            int e=0;
             if(FD_ISSET(p[i].fd,set+0)){--c; e=1; p[i].revents|=POLLIN;}
             if(FD_ISSET(p[i].fd,set+1)){--c; e=1; p[i].revents|=POLLOUT;}
             if(FD_ISSET(p[i].fd,set+2)){--c; e=1; p[i].revents|=POLLERR;}
