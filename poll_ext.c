@@ -148,6 +148,7 @@ int error_last(void){
 #endif
 
 #ifndef POLLIN
+static void WARNING___POLL_BY_SELECT(int WARNING___POLL_BY_SELECT_){char _WARNING___POLL_BY_SELECT[1]={0,0};}
 #define POLLIN 1
 #define POLLOUT 2
 #define POLLERR 4
@@ -183,9 +184,12 @@ static int WSAPoll(struct pollfd * const p,const int cnt,const int timeout){
             s+=e;
         }
     return s;
-    {char POLL_FALLBACK_SELECT[1]={0,0};}
+}
+static unsigned int _poll_szlim(const unsigned int size){
+    return size>FD_SETSIZE ? FD_SETSIZE : size;
 }
 #else
+#define _poll_szlim(_1_) (_1_)
 #define _POLL_BY_SELECT 0
 #endif
 
@@ -234,7 +238,7 @@ void poll_loop(poll_config_t * const cfg){
     size_t(* const inc)(size_t)=((cfg && cfg->increase) ? cfg->increase : _poll_inc);
     struct pollfd fd_stack[192], *fd=fd_stack;
     struct pollcb cb_stack[192], *cb=cb_stack;
-    unsigned int t=0, size=192, count=1;
+    unsigned int t=0, size=_poll_szlim(192), count=1;
     int err=0, wsa=cfg ? cfg->WSA : 0;
 
     if(g->w==INVALID_SOCKET){
@@ -248,8 +252,8 @@ void poll_loop(poll_config_t * const cfg){
         }else if(!(err=WSAGetLastError())) err=_WSAEUNKNOWN;
     }else err=WSAELOOP;
 
-    if(cfg && cfg->reserv>size && !err){
-        size=cfg->reserv;
+    if(cfg && _poll_szlim(cfg->reserv)>size && !err){
+        size=_poll_szlim(cfg->reserv);
         fd=(struct pollfd*)allocator(sizeof(*fd)*size);
         cb=(struct pollcb*)allocator(sizeof(*cb)*size);
         if(!fd || !cb) err=WSAENOBUFS;
@@ -275,10 +279,7 @@ void poll_loop(poll_config_t * const cfg){
                     } err=WSAEINTR; break;
                 }
                 if(count==size){
-                    unsigned int size_new=inc(size);
-                    #if _POLL_BY_SELECT
-                    if(size_new>FD_SETSIZE) size_new=FD_SETSIZE;
-                    #endif
+                    const unsigned int size_new=_poll_szlim(inc(size));
                     if(size_new>size){
                         struct pollfd * const fd_new=(struct pollfd*)allocator(sizeof(*fd_new)*size_new);
                         struct pollcb * const cb_new=(struct pollcb*)allocator(sizeof(*cb_new)*size_new);
