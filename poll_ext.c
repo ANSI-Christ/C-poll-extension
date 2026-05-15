@@ -217,7 +217,8 @@ static size_t _poll_inc(const size_t s){
 }
 
 static int _poll_getcmd(SOCKET s,struct pollcmd * const cmd){
-    return recv(s,(char*)cmd,_POLL_OFFSETOF(struct pollcmd,size)+1,MSG_NOSIGNAL)==_POLL_OFFSETOF(struct pollcmd,size);
+    int c; while( (c=recv(s,(char*)cmd,_POLL_OFFSETOF(struct pollcmd,size)+1,MSG_NOSIGNAL))==SOCKET_ERROR && WSAGetLastError()==WSAEINTR );
+    return c==_POLL_OFFSETOF(struct pollcmd,size);
 }
 
 static int _poll_setcmd(SOCKET s,const struct pollcmd * const cmd){
