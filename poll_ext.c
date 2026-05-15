@@ -217,7 +217,7 @@ static size_t _poll_inc(const size_t s){
 }
 
 static int _poll_getcmd(SOCKET s,struct pollcmd * const cmd){
-    return recv(s,(char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL)==_POLL_OFFSETOF(struct pollcmd,size);
+    return recv(s,(char*)cmd,_POLL_OFFSETOF(struct pollcmd,size)+1,MSG_NOSIGNAL)==_POLL_OFFSETOF(struct pollcmd,size);
 }
 
 static int _poll_setcmd(SOCKET s,const struct pollcmd * const cmd){
@@ -263,10 +263,10 @@ void poll_loop(poll_config_t * const cfg){
 
     while(!err){
         const int _c=WSAPoll(fd,count,(t?1000:-1));
-        unsigned int repeat=20, i=count, c=((_c!=SOCKET_ERROR)?_c:0);
+        unsigned int i=count, c=((_c!=SOCKET_ERROR)?_c:0);
 
         if(c && fd->revents){
-            struct pollcmd cmd; --c;
+            struct pollcmd cmd; unsigned int repeat=20;
             while(_poll_getcmd(fd->fd,&cmd) && --repeat){
                 if(!cmd.cb.f){
                     while(_poll_getcmd(fd->fd,&cmd)){
@@ -301,6 +301,7 @@ void poll_loop(poll_config_t * const cfg){
                     ++count;
                 }
             }
+            --c;
         }
 
         while((c|t) && --i){
@@ -335,11 +336,9 @@ void poll_loop(poll_config_t * const cfg){
 
 void poll_unloop(void){
     struct _poll_ctrl * const g=_poll_ctrl;
-    const struct pollcmd cmd={{(void(*)(int,void*))0,NULL,0},INVALID_SOCKET,0,0};
-    SOCKET s=g->w;
-    if(s!=INVALID_SOCKET){
-        g->w=INVALID_SOCKET;
-        _poll_setcmd(s,&cmd);
+    if(g->w!=INVALID_SOCKET){
+        SOCKET s=g->w; g->w=INVALID_SOCKET;
+        {struct pollcmd cmd; cmd.cb.f=(void(*)(int,void*))0; _poll_setcmd(s,&cmd);}
         shutdown(s,SD_BOTH);
         closesocket(s);
     }
