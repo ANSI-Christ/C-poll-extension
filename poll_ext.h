@@ -13,9 +13,8 @@
 typedef struct{
     void*(*allocator)(size_t size);
     void(*deallocator)(void *ptr);
-    void(*init)(int err,void *arg);
     size_t(*increase)(size_t old_size);
-    void(*mutex)(int cmd); /* cmd: 0 - unlock, 1 - lock */
+    void(*init)(int err,void *arg);
     void *iarg;
     unsigned int reserv; /* default: 192 on stack */
     int WSA; /* for Winapi only: 0 -> (2,2), -1 -> no use */

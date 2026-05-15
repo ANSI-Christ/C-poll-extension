@@ -33,12 +33,6 @@ void sleepf(double sec){
     while(nanosleep(&t,&t));
 }
 
-static void gmtx(const int lock){
-    static pthread_mutex_t mtx[1]={PTHREAD_MUTEX_INITIALIZER};
-    if(lock) pthread_mutex_lock(mtx);
-    else pthread_mutex_unlock(mtx);
-}
-
 static void on_init(int err,void *arg){
     int *x=(int*)arg;
     x[1]=err; x[0]=0;
@@ -139,25 +133,25 @@ int statemachine(struct statemachine * const m){
 }
 
 int main(){
-    pthread_t t[3];
-    int i,N=sizeof(t)/sizeof(*t);
-    poll_config_t cfg={
-        .mutex=gmtx,
-        .init=on_init
-    };
+    pthread_t t;
+    int i=0;
 
-    for(i=0;i<N;++i){
+    {
         int sync[2]={1,0};
-        cfg.iarg=sync;
-        if(pthread_create(t+i,NULL,(void*(*)(void*))poll_loop,&cfg)) break;
-        while(sync[0]) sleepf(0.01);
-        if(sync[1]){
-            printf("loop error %d\n",sync[1]);
-            break;
+        poll_config_t cfg={
+            .init=on_init,
+            .iarg=sync
+        };
+        if(!pthread_create(&t,NULL,(void*(*)(void*))poll_loop,&cfg)){
+            while(sync[0]) sleepf(0.01);
+            if(sync[1]){
+                printf("loop error %d\n",sync[1]);
+                pthread_join(t,NULL);
+            }else i=1;
         }
     }
 
-    if( (N=i) ){
+    if(i){
         struct statemachine m={0,0,0};
         int ret=0;
         while(!ret){
@@ -168,14 +162,9 @@ int main(){
             ret=statemachine(&m);
         }
         printf("%s\n",ret==1?"ok":"fail");
+        poll_unloop();
+        pthread_join(t,NULL);
     }
-
-    poll_unloop();
-
-    for(i=0;i<N;++i)
-        pthread_join(t[i],NULL);
 
     return 0;
 }
-
-

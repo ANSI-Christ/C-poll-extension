@@ -36,23 +36,38 @@ static int _poll_getopt(SOCKET s,const int o,void * const p,const unsigned int l
     int ls=l; return getsockopt(s,SOL_SOCKET,o,(char*)p,&ls);
 }
 
-static int _poll_pipe(void * const s){
+static int _socketpair_udp(SOCKET s[2]){
+    SOCKET r,w;
+    struct sockaddr_in a[2];
+    int l[2]={sizeof(*a),sizeof(*a)}, opt=1;
+    unsigned char * const ip=(unsigned char*)&a->sin_addr;
+    if( (r=socket(AF_INET,SOCK_DGRAM,0))==INVALID_SOCKET ) goto _clean1;
+    if( (w=socket(AF_INET,SOCK_DGRAM,0))==INVALID_SOCKET ) goto _clean2;
+    memset(a,0,sizeof(*a)); a->sin_family=AF_INET; a->sin_port=0; ip[0]=127; ip[1]=1; a[1]=*a;
+    if(bind(r,(struct sockaddr*)(a+0),*l)==SOCKET_ERROR || bind(w,(struct sockaddr*)(a+1),*l)==SOCKET_ERROR) goto _clean3;
+    if(getsockname(r,(struct sockaddr*)(a+0),l+0)==SOCKET_ERROR || getsockname(w,(struct sockaddr*)(a+1),l+1)==SOCKET_ERROR) goto _clean3;
+    if(connect(r,(struct sockaddr*)(a+1),l[1])==SOCKET_ERROR || connect(w,(struct sockaddr*)(a+0),l[0])==SOCKET_ERROR) goto _clean3;
+    s[0]=r; s[1]=w;
+    return 1;
+_clean3:
+    closesocket(w);
+_clean2:
+    closesocket(r);
+_clean1:
+    return 0;
+}
+
+/*static int _socketpair_tcp(SOCKET s[2]){
     SOCKET l,r,w;
-    struct sockaddr_in addr;
-    int len=sizeof(addr);
-    unsigned char * const ip=(unsigned char*)&addr.sin_addr;
-    memset(&addr,0,sizeof(addr));
-    addr.sin_family=AF_INET;
-    addr.sin_port=0; ip[0]=127; ip[3]=1;
-    if( (l=socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET )
-        goto _clean1;
-    if( bind(l,(struct sockaddr*)&addr,len)==SOCKET_ERROR || listen(l,1)==SOCKET_ERROR || (w=socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET )
-        goto _clean2;
-    if( getsockname(l,(struct sockaddr*)&addr,&len) || connect(w,(struct sockaddr*)&addr,len)==SOCKET_ERROR || (r=accept(l,NULL,NULL))==INVALID_SOCKET )
-        goto _clean3;
+    struct sockaddr_in a[1];
+    int len=sizeof(a);
+    unsigned char * const ip=(unsigned char*)&a->sin_addr;
+    if( (l=socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET ) goto _clean1;
+    memset(a,0,sizeof(*a)); a->sin_family=AF_INET; a->sin_port=0; ip[0]=127; ip[1]=1;
+    if( bind(l,(struct sockaddr*)a,len)==SOCKET_ERROR || listen(l,1)==SOCKET_ERROR || (w=socket(AF_INET,SOCK_STREAM,0))==INVALID_SOCKET ) goto _clean2;
+    if( getsockname(l,(struct sockaddr*)a,&len) || connect(w,(struct sockaddr*)a,len)==SOCKET_ERROR || (r=accept(l,NULL,NULL))==INVALID_SOCKET ) goto _clean3;
     closesocket(l);
-    ((SOCKET*)s)[0]=r;
-    ((SOCKET*)s)[1]=w;
+    s[0]=r; s[1]=w;
     return 1;
 _clean3:
     closesocket(w);
@@ -60,7 +75,10 @@ _clean2:
     closesocket(l);
 _clean1:
     return 0;
+}*/
 
+static int _poll_pipe(void * const s){
+    return _socketpair_udp((SOCKET*)s);
 }
 
 int socket_mode(void * const s,const int b){
@@ -92,7 +110,6 @@ typedef int SOCKET;
 #define WSAEINTR EINTR
 #define WSAEBADF EBADF
 #define WSAEINVAL EINVAL
-#define WSAEFAULT EFAULT
 #define WSAENOBUFS ENOBUFS
 #define WSAETIMEDOUT ETIMEDOUT
 #define WSAEAFNOSUPPORT EAFNOSUPPORT
@@ -106,7 +123,7 @@ static int _poll_getopt(SOCKET s,const int o,void * const p,const unsigned int l
 }
 
 static int _poll_pipe(void * const s){
-    return socketpair(AF_UNIX,SOCK_STREAM,0,(SOCKET*)s)!=SOCKET_ERROR;
+    return socketpair(AF_UNIX,SOCK_DGRAM,0,(SOCKET*)s)!=SOCKET_ERROR;
 }
 
 int socket_mode(void * const _s,const int b){
@@ -192,28 +209,17 @@ static struct _poll_ctrl{
 
 
 int _poll_socket_error(void * const s){
-    int e=0;
-    _poll_getopt(*(SOCKET*)s,SO_ERROR,&e,sizeof(e));
-    return e;
+    int e=0; _poll_getopt(*(SOCKET*)s,SO_ERROR,&e,sizeof(e)); return e;
 }
 
 static int _poll_getcmd(SOCKET s,struct pollcmd * const cmd){
-_mark:
-    switch(recv(s,(char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL)){
-        case _POLL_OFFSETOF(struct pollcmd,size): return 1;
-        case SOCKET_ERROR: if(WSAGetLastError()==WSAEINTR) goto _mark;
-    }
-    return 0;
+    return recv(s,(char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL)==_POLL_OFFSETOF(struct pollcmd,size);
 }
 
 static int _poll_setcmd(SOCKET s,const struct pollcmd * const cmd){
-_mark:
-    switch(send(s,(const char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL)){
-        case _POLL_OFFSETOF(struct pollcmd,size): return 0;
-        case SOCKET_ERROR: if(WSAGetLastError()!=WSAEINTR){return WSAELOOP;}
-        case 0: goto _mark;
-    }
-    return WSAEFAULT;
+    while(send(s,(const char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL)!=_POLL_OFFSETOF(struct pollcmd,size))
+        if(WSAGetLastError()!=WSAEINTR) return WSAELOOP;
+    return 0;
 }
 
 static void _poll_mtx(const int lock){return;if(lock)_poll_setopt(INVALID_SOCKET,0,NULL,0);}
@@ -222,29 +228,25 @@ static size_t _poll_inc(const size_t s){
 }
 
 void poll_loop(poll_config_t * const cfg){
-    static unsigned int _loops=0;
     struct _poll_ctrl * const g=_poll_ctrl;
     void*(* const allocator)(size_t)=((cfg && cfg->allocator) ? cfg->allocator : malloc);
     void(* const deallocator)(void*)=((cfg && cfg->deallocator) ? cfg->deallocator : free);
     size_t(* const inc)(size_t)=((cfg && cfg->increase) ? cfg->increase : _poll_inc);
-    void(* const mtx)(int)=((cfg && cfg->mutex) ? cfg->mutex : _poll_mtx);
     struct pollfd fd_stack[192], *fd=fd_stack;
     struct pollcb cb_stack[192], *cb=cb_stack;
     unsigned int t=0, size=192, count=1;
-    int err=0, wsa=cfg ? cfg->WSA : 0;
+    int err=0, wsa=cfg ? cfg->WSA : 0, _loops=(g->r==INVALID_SOCKET);
 
-    mtx(1);
-    if(++_loops==1){
-        if((_poll_startup(wsa) || !(wsa=-1)) && _poll_pipe(g)){
+    if(_loops==1){
+        if( (_poll_startup(wsa) || !(wsa=-1)) && _poll_pipe(g) ){
             #ifdef SO_NOSIGPIPE
             const int opt=1;
             _poll_setopt(g->r,SO_NOSIGPIPE,&opt,sizeof(opt));
             _poll_setopt(g->w,SO_NOSIGPIPE,&opt,sizeof(opt));
             #endif
-        }else err=WSAGetLastError();
+            socket_mode(&g->r,0);
+        }else if(!(err=WSAGetLastError())) err=_WSAEUNKNOWN;
     }
-    mtx(0);
-
     if(cfg && cfg->reserv>size && !err){
         size=cfg->reserv;
         fd=(struct pollfd*)allocator(sizeof(*fd)*size);
@@ -265,8 +267,12 @@ void poll_loop(poll_config_t * const cfg){
 
         if(c && fd->revents){
             struct pollcmd cmd; --c;
-_mark:
-            if(_poll_getcmd(fd->fd,&cmd)){
+            while(_poll_getcmd(fd->fd,&cmd) && --repeat){
+                if(!cmd.cb.f){
+                    while(_poll_getcmd(fd->fd,&cmd)){
+                        cmd.cb.f(WSAELOOP,cmd.cb.a);
+                    } err=-1; break;
+                }
                 if(count==size){
                     const unsigned int size_new=inc(size);
                     if(size_new>size){
@@ -296,10 +302,7 @@ _mark:
                         ++count;
                     }while(0);
                 }
-                if(repeat && WSAPoll(fd,1,0)>0){
-                    --repeat; goto _mark;
-                }
-            }else err=-1;
+            }
         }
 
         while((c|t) && --i){
@@ -323,24 +326,21 @@ _mark:
     if(fd && fd!=fd_stack) deallocator(fd);
     if(cb && cb!=cb_stack) deallocator(cb);
 
-    mtx(1);
     if(!--_loops){
-        if(g->w!=INVALID_SOCKET){
-            closesocket(g->w);
-            g->w=INVALID_SOCKET;
-        }
-        if(g->r!=INVALID_SOCKET){
-            closesocket(g->r);
-            g->r=INVALID_SOCKET;
-        }
+        if(g->w!=INVALID_SOCKET) closesocket(g->w);
+        if(g->r!=INVALID_SOCKET) closesocket(g->r);
         _poll_cleanup(wsa);
+        g->w=INVALID_SOCKET;
+        g->r=INVALID_SOCKET;
     }
-    mtx(0);
 }
 
 void poll_unloop(void){
     struct _poll_ctrl * const g=_poll_ctrl;
-    if(g->r!=INVALID_SOCKET) shutdown(g->w,SD_BOTH);
+    if(g->r!=INVALID_SOCKET){
+        const struct pollcmd cmd={{(void(*)(int,void*))0,NULL,0},INVALID_SOCKET,0,0};
+        _poll_setcmd(g->w,&cmd); shutdown(g->w,SD_BOTH);
+    }
 }
 
 static int _poll_add(void * const s,const int e,void(* const f)(int,void*),void * const a,const time_t t){
