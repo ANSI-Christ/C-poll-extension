@@ -21,5 +21,5 @@ The library doesn't hide OS specifics or impose a usage model — you get native
 
 ## Notes
  - examples are in [main.c](main.c)
- - on Windows if WSApoll isn't exist then have auto fallback to select
- - on UNIX if poll isn't exist then it have fallback to select by compiling with -DPOLL_BY_SELECT
+ - on Windows if `WSApoll()` isn't exist then have auto fallback to `select()`
+ - on UNIX if `poll()` isn't exist then it have fallback to select with -DPOLL_BY_SELECT flag

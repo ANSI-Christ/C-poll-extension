@@ -345,10 +345,6 @@ int poll_both_tm(void * const s,void(* const f)(int,void*),void * const a,const 
 
 /* ------------------- useful things --------------------- */
 
-int error_last(void){
-    return WSAGetLastError();
-}
-
 #define _CALL_BODY(_c_,_act_) {do{ const int b=_c_; if(b==SOCKET_ERROR){if(WSAGetLastError()==WSAEINTR){continue;} return 0;} if(!b){return !c;} _act_ }while(c); return 1;}
 static int _recv_trash(SOCKET s,char *p,unsigned int d,unsigned int c) _CALL_BODY(recv(s,p,d,MSG_NOSIGNAL),c-=b;)
 static int _recv_exact(SOCKET s,char *p,unsigned int c) _CALL_BODY(recv(s,p,c,MSG_NOSIGNAL),c-=b; p+=b;);

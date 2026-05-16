@@ -16,13 +16,14 @@ typedef struct{
     size_t(*increase)(size_t old_size);
     void(*init)(int err,void *arg);
     void *iarg;
-    unsigned int reserv; /* default: 192 on stack */
+    unsigned int reserv;
     int WSA; /* for Winapi only: 0 -> (2,2), -1 -> no use */
 }poll_config_t;
 
 void poll_loop(poll_config_t *cfg);
 void poll_unloop(void);
 
+/* poll_ functions below return [ 0, #INVAL, #LOOP, #NOBUFS^1 ], where '#' is OS native prefix [ E, WSAE ]. ^1: only on 'select' impl */
 int poll_recv(void *os_socket,void(*callback)(int err,void *arg),void *arg);
 int poll_send(void *os_socket,void(*callback)(int err,void *arg),void *arg);
 int poll_both(void *os_socket,void(*callback)(int err,void *arg),void *arg);
@@ -35,6 +36,7 @@ int poll_both_tm(void *os_socket,void(*callback)(int err,void *arg),void *arg,un
 
 
 
+
 /* usefull helpers */
 
 struct netaddr{
@@ -42,11 +44,10 @@ struct netaddr{
     unsigned char ip[16];
 };
 
-int DNS_request(void *os_socket,int family,const char *host_name);
-int DNS_response(void *os_socket,struct netaddr *buffer,unsigned int size);
+int DNS_request(void *os_socket,int family,const char *host_name); /* return number of requests sended or [-1, SOCKET_ERROR].*/
+int DNS_response(void *os_socket,struct netaddr *buffer,unsigned int size); /* return  number of addresses received or [-1, SOCKET_ERROR]. */
 
-int socket_mode(void *os_socket,int blocking);
-int error_last(void);
+int socket_mode(void *os_socket,int blocking); /* return result of fcntl / ioctlsocket */
 
 void d2net(void *base_type_address);
 void d2host(void *base_type_address);
