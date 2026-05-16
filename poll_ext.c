@@ -113,10 +113,6 @@ int socket_mode(void * const _s,const int b){
 
 #endif
 
-int error_last(void){
-    return WSAGetLastError();
-}
-
 #define _WSAEUNKNOWN -1
 
 #ifndef MSG_NOSIGNAL
@@ -135,10 +131,8 @@ struct pollfd{
 };
 static int WSAPoll(struct pollfd * const p,const int cnt,const int timeout){
     struct timeval t={timeout/1000,1000*(timeout%1000)};
-    int i,s,c;
-    SOCKET max=p->fd;
-    fd_set set[3];
-    FD_ZERO(set);FD_ZERO(set+1);FD_ZERO(set+2);
+    SOCKET max=p->fd; int i,s,c;
+    fd_set set[3]; FD_ZERO(set);FD_ZERO(set+1);FD_ZERO(set+2);
     for(i=0;i<cnt;++i){
         p[i].revents=0;
         if(p[i].events & POLLIN) FD_SET(p[i].fd,set);
@@ -207,7 +201,7 @@ static int _poll_setcmd(const struct pollcmd * const cmd){
 
 void poll_unloop(void){
     struct _poll_ctrl * const g=_poll_ctrl;
-    struct pollcmd cmd[1]; cmd->cb.f=(void(*)(int,void*))0;
+    struct pollcmd cmd[1]; cmd->ev=0;
     while(send(g->w,(const char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL)!=_POLL_OFFSETOF(struct pollcmd,size))
         if(WSAGetLastError()!=WSAEINTR) return;
     shutdown(g->w,SD_BOTH);
@@ -243,22 +237,21 @@ void poll_loop(poll_config_t * const cfg){
     if(!err){
         fd->fd=g->r;
         fd->events=POLLIN;
-        fd->revents=0;
     }
     if(cfg && cfg->init)
         cfg->init(err,cfg->iarg);
 
     while(!err){
         const int _c=WSAPoll(fd,count,(t?1000:-1));
-        unsigned int i=count, c=((_c!=SOCKET_ERROR)?_c:0);
+        unsigned int i=count, dt=0, c=((_c!=SOCKET_ERROR)?_c:0);
 
         if(c && fd->revents){
             struct pollcmd cmd; unsigned int repeat=20;
             while(_poll_getcmd(&cmd) && --repeat){
-                if(!cmd.cb.f){
-                    while(_poll_getcmd(&cmd)){
-                        cmd.cb.f(WSAELOOP,cmd.cb.a);
-                    } err=WSAEINTR; break;
+                if(!cmd.ev){
+                    while(_poll_getcmd(&cmd))
+                        if(cmd.ev) cmd.cb.f(WSAELOOP,cmd.cb.a);
+                    err=WSAEINTR; break;
                 }
                 if(count==size){
                     const unsigned int size_new=_poll_szlim(inc(size));
@@ -280,8 +273,7 @@ void poll_loop(poll_config_t * const cfg){
                     cb[count]=cmd.cb;
                     fd[count].fd=cmd.fd;
                     fd[count].events=cmd.ev;
-                    fd[count].revents=0;
-                    t+=(cmd.cb.t!=0);
+                    dt+=(cmd.cb.t!=0);
                     ++count;
                 }
             }
@@ -302,7 +294,7 @@ void poll_loop(poll_config_t * const cfg){
                 f.f(WSAETIMEDOUT,f.a);
             }
         }
-
+        t+=dt;
     }
 
     while(--count) cb[count].f(WSAELOOP,cb[count].a);
@@ -350,13 +342,12 @@ int poll_both_tm(void * const s,void(* const f)(int,void*),void * const a,const 
     return _poll_add(s,POLLIN|POLLOUT,f,a,time(NULL)+t);
 }
 
-int poll_timer(void(* const f)(int,void*),void * const a,const unsigned int t){
-    struct _poll_ctrl * const g=_poll_ctrl;
-    if(!t) return WSAETIMEDOUT;
-    return _poll_add(&g->w,POLLIN,f,a,time(NULL)+t);
-}
 
 /* ------------------- useful things --------------------- */
+
+int error_last(void){
+    return WSAGetLastError();
+}
 
 struct _dns_header{
     unsigned short i, f, qdc, anc, nsc, arc;

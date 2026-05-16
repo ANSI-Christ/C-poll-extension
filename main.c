@@ -152,10 +152,8 @@ int main(){
     }
 
     if(i){
-        struct statemachine m={0,1,0};
+        struct statemachine m={0,0,0};
         int ret=0;
-        poll_timer(smcallback,&m,4);
-        printf("delay 4 sec\n");
         while(!ret){
             unsigned int sleepcnt=0;
             while(m.wait){sleepf(0.1); printf("\r... wait %f sec",++sleepcnt*0.1); fflush(stdout);}
