@@ -319,7 +319,7 @@ void poll_loop(poll_config_t * const cfg){
 
 static int _poll_add(void * const s,const int e,void(* const f)(int,void*),void * const a,const time_t t){
     struct _poll_ctrl * const g=_poll_ctrl;
-    if(!s || *(SOCKET*)s==INVALID_SOCKET || !f || !a) return WSAEINVAL;
+    if(!s || *(SOCKET*)s==INVALID_SOCKET || !f) return WSAEINVAL;
     #if _POLL_BY_SELECT==2
     if(*(SOCKET*)s>=FD_SETSIZE) return WSAENOBUFS;
     #endif
@@ -348,6 +348,12 @@ int poll_both(void * const s,void(* const f)(int,void*),void * const a){
 
 int poll_both_tm(void * const s,void(* const f)(int,void*),void * const a,const unsigned int t){
     return _poll_add(s,POLLIN|POLLOUT,f,a,time(NULL)+t);
+}
+
+int poll_timer(void(* const f)(int,void*),void * const a,const unsigned int t){
+    struct _poll_ctrl * const g=_poll_ctrl;
+    if(!t) return WSAETIMEDOUT;
+    return _poll_add(&g->w,POLLIN,f,a,time(NULL)+t);
 }
 
 /* ------------------- useful things --------------------- */

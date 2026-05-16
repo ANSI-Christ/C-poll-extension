@@ -31,7 +31,7 @@ int poll_recv_tm(void *os_socket,void(*callback)(int err,void *arg),void *arg,un
 int poll_send_tm(void *os_socket,void(*callback)(int err,void *arg),void *arg,unsigned int seconds);
 int poll_both_tm(void *os_socket,void(*callback)(int err,void *arg),void *arg,unsigned int seconds);
 
-
+int poll_timer(void(*callback)(int err,void *arg),void *arg,unsigned int seconds);
 
 
 
