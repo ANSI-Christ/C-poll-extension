@@ -68,6 +68,7 @@ int socket_mode(void * const s,const int b){
 #ifdef POLL_BY_SELECT
 #include <sys/time.h>
 #include <sys/select.h>
+#define _POLL_BY_SELECT_UNIX
 #else
 #include <poll.h>
 #endif
@@ -79,8 +80,8 @@ typedef int SOCKET;
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR   -1
 #define closesocket close
-#define WSASetLastError(_1_) do{errno=(_1_);}while(0)
-#define WSAGetLastError() (errno)
+#define WSASetLastError(_1_) errno=(_1_)
+#define WSAGetLastError() errno
 #define WSAPoll poll
 #define WSAELOOP ELOOP
 #define WSAEINTR EINTR
@@ -138,12 +139,9 @@ static int WSAPoll(struct pollfd * const p,const int cnt,const int timeout){
         if(p[i].events & POLLIN) FD_SET(p[i].fd,set);
         if(p[i].events & POLLOUT) FD_SET(p[i].fd,set+1);
         FD_SET(p[i].fd,set+2);
-#ifdef _WIN32
-#define _POLL_BY_SELECT 1
-#else
-#define _POLL_BY_SELECT 2
+        #ifdef _POLL_BY_SELECT_UNIX
         if(p[i].fd>max) max=p[i].fd;
-#endif
+        #endif
     }
     if((s=select(max+1,set,set+1,set+2,timeout<0?NULL:&t))!=SOCKET_ERROR)
         for(c=s,i=s=0;c && i<cnt;++i){
@@ -160,7 +158,6 @@ static unsigned int _poll_szlim(const unsigned int size){
 }
 #else
 #define _poll_szlim(_1_) (_1_)
-#define _POLL_BY_SELECT 0
 #endif
 
 
@@ -319,7 +316,7 @@ void poll_loop(poll_config_t * const cfg){
 static int _poll_add(void * const s,const int e,void(* const f)(int,void*),void * const a,const time_t t){
     struct _poll_ctrl * const g=_poll_ctrl;
     if(!s || *(SOCKET*)s==INVALID_SOCKET || !f) return WSAEINVAL;
-    #if _POLL_BY_SELECT==2
+    #ifdef _POLL_BY_SELECT_UNIX
     if(*(SOCKET*)s>=FD_SETSIZE) return WSAENOBUFS;
     #endif
     {const struct pollcmd cmd={{f,a,t},*(SOCKET*)s,e,0}; return _poll_setcmd(&cmd);}
@@ -395,12 +392,12 @@ int DNS_request(void * const _s,const int family,const char * const host){
             req.h.qdc=1; d2net(&req.h.qdc);
             req.h.anc=req.h.nsc=req.h.arc=0;
             if(family==AF_INET){i=1; af[0]=1;}
-#ifdef AF_INET6
+            #ifdef AF_INET6
             else if(family==AF_INET6){i=1; af[0]=28;}
-#endif
-#ifdef AF_UNSPEC
+            #endif
+            #ifdef AF_UNSPEC
             else if(family==AF_UNSPEC){i=1; af[0]=28; af[1]=1;}
-#endif
+            #endif
             else{WSASetLastError(WSAEAFNOSUPPORT); return SOCKET_ERROR;}
 
             while(i){
