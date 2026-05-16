@@ -215,7 +215,7 @@ void poll_loop(poll_config_t * const cfg){
     struct pollfd fd_stack[192], *fd=fd_stack;
     struct pollcb cb_stack[192], *cb=cb_stack;
     unsigned int t=0, size=_poll_szlim(192), count=1;
-    int err=0, wsa=cfg ? cfg->WSA : 0;
+    int err=0, tm=-1, wsa=cfg ? cfg->WSA : 0;
 
     if(g->w==INVALID_SOCKET){
         if( (_poll_startup(wsa) || !(wsa=-1)) && _poll_pipe(g) ){
@@ -242,8 +242,8 @@ void poll_loop(poll_config_t * const cfg){
         cfg->init(err,cfg->iarg);
 
     while(!err){
-        const int _c=WSAPoll(fd,count,(t?1000:-1));
-        unsigned int i=count, dt=0, c=((_c!=SOCKET_ERROR)?_c:0);
+        const int _c=WSAPoll(fd,count,tm);
+        unsigned int i=count, dt=0, c=((_c!=SOCKET_ERROR)?_c:0); tm=86400;
 
         if(c && fd->revents){
             struct pollcmd cmd; unsigned int repeat=20;
@@ -273,7 +273,10 @@ void poll_loop(poll_config_t * const cfg){
                     cb[count]=cmd.cb;
                     fd[count].fd=cmd.fd;
                     fd[count].events=cmd.ev;
-                    dt+=(cmd.cb.t!=0);
+                    if(cmd.cb.t){
+                        const long d=cmd.cb.t-time(NULL);
+                        if(d<tm){tm=d;} ++dt;
+                    }
                     ++count;
                 }
             }
@@ -288,13 +291,17 @@ void poll_loop(poll_config_t * const cfg){
                 if(e & POLLERR) _poll_getopt(s,SO_ERROR,&err,sizeof(err));
                 if(e & POLLNVAL) err=WSAEBADF;
                 f.f(err,f.a);
-            }else if(cb[i].t && time(NULL)>=cb[i].t){
-                const struct pollcb f=cb[i]; --t;
-                if(i!=--count){fd[i]=fd[count]; cb[i]=cb[count];}
-                f.f(WSAETIMEDOUT,f.a);
+            }else if(cb[i].t){
+                const long d=cb[i].t-time(NULL);
+                if(d<=0){
+                    const struct pollcb f=cb[i]; --t;
+                    if(i!=--count){fd[i]=fd[count]; cb[i]=cb[count];}
+                    f.f(WSAETIMEDOUT,f.a);
+                }else if(d<tm) tm=d;
             }
         }
-        t+=dt;
+
+        if((t+=dt)) tm*=(tm>0)*1000; else tm=-1;
     }
 
     while(--count) cb[count].f(WSAELOOP,cb[count].a);
