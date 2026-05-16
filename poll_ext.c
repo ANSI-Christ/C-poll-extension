@@ -262,19 +262,21 @@ void poll_loop(poll_config_t * const cfg){
                         }else{
                             if(fd_new) deallocator(fd_new);
                             if(cb_new) deallocator(cb_new);
-                            cmd.cb.f(WSAENOBUFS,cmd.cb.a);
+                            goto _mark;
                         }
+                    }else{
+_mark:
+                        cmd.cb.f(WSAENOBUFS,cmd.cb.a);
+                        continue;
                     }
                 }
-                if(count<size){
-                    cb[count]=cmd.cb;
-                    fd[count].fd=cmd.fd;
-                    fd[count].events=cmd.ev;
-                    if(cmd.cb.t){
-                        const long d=cmd.cb.t-time(NULL);
-                        if(d<tm){tm=d;} ++dt;
-                    }
-                    ++count;
+                cb[count]=cmd.cb;
+                fd[count].fd=cmd.fd;
+                fd[count].events=cmd.ev;
+                ++count;
+                if(cmd.cb.t){
+                    const long d=cmd.cb.t-time(NULL);
+                    if(d<tm){tm=d;} ++dt;
                 }
             }
             --c;
@@ -283,7 +285,7 @@ void poll_loop(poll_config_t * const cfg){
         while((c|t) && --i){
             const short e=fd[i].revents;
             if(e){
-                int err=0; const struct pollcb f=cb[i]; SOCKET s=fd[i].fd; --c; t-=(f.t!=0);
+                const struct pollcb f=cb[i]; SOCKET s=fd[i].fd; int err=0; --c; t-=(f.t!=0);
                 if(i!=--count){fd[i]=fd[count]; cb[i]=cb[count];}
                 if(e & POLLERR) _poll_getopt(s,SO_ERROR,&err,sizeof(err));
                 if(e & POLLNVAL) err=WSAEBADF;
