@@ -349,6 +349,12 @@ int error_last(void){
     return WSAGetLastError();
 }
 
+#define _CALL_BODY(_c_,_act_) {do{ const int b=_c_; if(b==SOCKET_ERROR){if(WSAGetLastError()==WSAEINTR){continue;} return 0;} if(!b){return !c;} _act_ }while(c); return 1;}
+static int _recv_trash(SOCKET s,char *p,unsigned int d,unsigned int c) _CALL_BODY(recv(s,p,d,MSG_NOSIGNAL),c-=b;)
+static int _recv_exact(SOCKET s,char *p,unsigned int c) _CALL_BODY(recv(s,p,c,MSG_NOSIGNAL),c-=b; p+=b;);
+static int _send_all(SOCKET s,const char *p,unsigned int c) _CALL_BODY(send(s,p,c,MSG_NOSIGNAL),c-=b; p+=b;);
+#undef _CALL_BODY
+
 struct _dns_header{
     unsigned short i, f, qdc, anc, nsc, arc;
 };
@@ -397,7 +403,7 @@ int DNS_request(void * const _s,const int family,const char * const host){
             while(i){
                 u.x[0]=af[--i]; d2net(&u.x[0]);
                 *((struct tmp*)(p+1))=u.c;
-                c+=(st==SOCK_DGRAM || send(s,(const char*)&nl,2,MSG_NOSIGNAL)==2) && (send(s,(const char*)&req,l,MSG_NOSIGNAL)==l);
+                c+=(st==SOCK_DGRAM || _send_all(s,(const char*)&nl,2)) && _send_all(s,(const char*)&req,l);
             }
             return c;
         }
@@ -406,7 +412,7 @@ int DNS_request(void * const _s,const int family,const char * const host){
     return SOCKET_ERROR;
 }
 
-static int _dns_parse_answer(struct _dns_header * const h,struct netaddr * const a,const unsigned int size){
+static unsigned int _dns_parse_answer(struct _dns_header * const h,struct netaddr * const a,const unsigned int size){
     unsigned int count=0;
     d2host(&h->i); d2host(&h->f);
     if(h->i==0xdb42 && !(h->f & 15) && h->anc){
@@ -435,22 +441,27 @@ static int _dns_parse_answer(struct _dns_header * const h,struct netaddr * const
 
 int DNS_response(void * const _s,struct netaddr * const a,const unsigned int size){
     if(_s && a){
-        struct{ struct _dns_header h; unsigned char data[1024*2]; }res;
+        struct{ struct _dns_header h; unsigned char data[1024]; }_res, *res=&_res;
         SOCKET s=*(SOCKET*)_s;
-        int st=SOCK_DGRAM, bytes=sizeof(res);
+        int st=SOCK_DGRAM, bytes=sizeof(*res);
         if(_poll_getopt(s,SO_TYPE,&st,sizeof(st))==SOCKET_ERROR)
             return SOCKET_ERROR;
-        if(st!=SOCK_DGRAM){
+        if(st==SOCK_STREAM){
             unsigned short sz;
-            bytes=recv(s,(char*)&sz,2,MSG_NOSIGNAL);
-            if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
-            if(bytes<2){WSASetLastError(_WSAEUNKNOWN); return 0;}
+            if(!_recv_exact(s,(char*)&sz,2)) return 0;
             d2host(&sz); bytes=sz;
-        }
-        bytes=recv(s,(char*)&res,bytes,MSG_NOSIGNAL);
-        if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
-        if(bytes>11) return _dns_parse_answer(&res.h,a,size);
-        WSASetLastError(_WSAEUNKNOWN); return 0;
+            if( bytes>sizeof(res) && !((*(void**)&res)=malloc(bytes)) ){
+                _recv_trash(s,(char*)&_res,sizeof(_res),bytes); return 0;
+            }
+            if(!_recv_exact(s,(char*)res,bytes)) return 0;
+        }else if(st==SOCK_DGRAM){
+            bytes=recv(s,(char*)res,bytes,MSG_NOSIGNAL);
+            if(bytes==SOCKET_ERROR) return SOCKET_ERROR;
+        }else{WSASetLastError(WSAEINVAL); return SOCKET_ERROR;}
+        if(bytes>11){
+            st=(int)_dns_parse_answer(&res->h,a,size);
+            if(res!=&_res){free(res);} return st;
+        }return 0;
     }else WSASetLastError(WSAEINVAL);
     return SOCKET_ERROR;
 }
