@@ -90,7 +90,7 @@ typedef int SOCKET;
 #define WSAENOBUFS ENOBUFS
 #define WSAETIMEDOUT ETIMEDOUT
 #define WSAEAFNOSUPPORT EAFNOSUPPORT
-#define SD_BOTH SHUT_RDWR
+#define SD_SEND SHUT_WR
 #define _poll_startup(ver) (1)
 #define _poll_cleanup(ver) while(0)
 
@@ -160,6 +160,7 @@ static unsigned int _poll_szlim(const unsigned int size){
 #define _poll_szlim(_1_) (_1_)
 #endif
 
+#define _poll_time() time(NULL)
 
 struct pollcb{
     void(*f)(int,void*);
@@ -183,9 +184,8 @@ static size_t _poll_inc(const size_t s){
     return s<<1;
 }
 
-static int _poll_getcmd(struct pollcmd * const cmd){
-    struct _poll_ctrl * const g=_poll_ctrl; int c;
-    while( (c=recv(g->r,(char*)cmd,_POLL_OFFSETOF(struct pollcmd,size)+1,MSG_NOSIGNAL))==SOCKET_ERROR && WSAGetLastError()==WSAEINTR );
+static int _poll_getcmd(SOCKET s,struct pollcmd * const cmd){
+    int c; while( (c=recv(s,(char*)cmd,_POLL_OFFSETOF(struct pollcmd,size)+1,MSG_NOSIGNAL))==SOCKET_ERROR && WSAGetLastError()==WSAEINTR );
     return c==_POLL_OFFSETOF(struct pollcmd,size);
 }
 
@@ -197,11 +197,7 @@ static int _poll_setcmd(const struct pollcmd * const cmd){
 }
 
 void poll_unloop(void){
-    struct _poll_ctrl * const g=_poll_ctrl;
-    struct pollcmd cmd[1]; cmd->ev=0;
-    while(send(g->w,(const char*)cmd,_POLL_OFFSETOF(struct pollcmd,size),MSG_NOSIGNAL)!=_POLL_OFFSETOF(struct pollcmd,size))
-        if(WSAGetLastError()!=WSAEINTR) return;
-    shutdown(g->w,SD_BOTH);
+    struct pollcmd cmd; cmd.ev=0; _poll_setcmd(&cmd);
 }
 
 void poll_loop(poll_config_t * const cfg){
@@ -244,9 +240,10 @@ void poll_loop(poll_config_t * const cfg){
 
         if(c && fd->revents){
             struct pollcmd cmd; unsigned int repeat=20;
-            while(_poll_getcmd(&cmd) && --repeat){
+            while(_poll_getcmd(fd->fd,&cmd) && --repeat){
                 if(!cmd.ev){
-                    while(_poll_getcmd(&cmd))
+                    shutdown(g->w,SD_SEND);
+                    while(_poll_getcmd(fd->fd,&cmd))
                         if(cmd.ev) cmd.cb.f(WSAELOOP,cmd.cb.a);
                     err=WSAEINTR; break;
                 }
@@ -275,7 +272,7 @@ _mark:
                 fd[count].events=cmd.ev;
                 ++count;
                 if(cmd.cb.t){
-                    const long d=cmd.cb.t-time(NULL);
+                    const long d=cmd.cb.t-_poll_time();
                     if(d<tm){tm=d;} ++dt;
                 }
             }
@@ -291,7 +288,7 @@ _mark:
                 if(e & POLLNVAL) err=WSAEBADF;
                 f.f(err,f.a);
             }else if(cb[i].t){
-                const long d=cb[i].t-time(NULL);
+                const long d=cb[i].t-_poll_time();
                 if(d<=0){
                     const struct pollcb f=cb[i]; --t;
                     if(i!=--count){fd[i]=fd[count]; cb[i]=cb[count];}
@@ -316,7 +313,6 @@ _mark:
 }
 
 static int _poll_add(void * const s,const int e,void(* const f)(int,void*),void * const a,const time_t t){
-    struct _poll_ctrl * const g=_poll_ctrl;
     if(!s || *(SOCKET*)s==INVALID_SOCKET || !f) return WSAEINVAL;
     #ifdef _POLL_BY_SELECT_UNIX
     if(*(SOCKET*)s>=FD_SETSIZE) return WSAENOBUFS;
@@ -329,7 +325,7 @@ int poll_recv(void * const s,void(* const f)(int,void*),void * const a){
 }
 
 int poll_recv_tm(void * const s,void(* const f)(int,void*),void * const a,const unsigned int t){
-    return _poll_add(s,POLLIN,f,a,time(NULL)+t);
+    return _poll_add(s,POLLIN,f,a,_poll_time()+t);
 }
 
 int poll_send(void * const s,void(* const f)(int,void*),void * const a){
@@ -337,7 +333,7 @@ int poll_send(void * const s,void(* const f)(int,void*),void * const a){
 }
 
 int poll_send_tm(void * const s,void(* const f)(int,void*),void * const a,const unsigned int t){
-    return _poll_add(s,POLLOUT,f,a,time(NULL)+t);
+    return _poll_add(s,POLLOUT,f,a,_poll_time()+t);
 }
 
 int poll_both(void * const s,void(* const f)(int,void*),void * const a){
@@ -345,7 +341,7 @@ int poll_both(void * const s,void(* const f)(int,void*),void * const a){
 }
 
 int poll_both_tm(void * const s,void(* const f)(int,void*),void * const a,const unsigned int t){
-    return _poll_add(s,POLLIN|POLLOUT,f,a,time(NULL)+t);
+    return _poll_add(s,POLLIN|POLLOUT,f,a,_poll_time()+t);
 }
 
 
