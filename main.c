@@ -136,6 +136,11 @@ int main(){
     pthread_t t;
     int i=0;
 
+    if( (i=poll_prepare(0,0)) ){ /* prepare defaults: 1 loop and WSASturtup(0x0202,...) */
+        printf("prepare err %d\n",i);
+        return -1;
+    }
+
     {
         int sync[2]={1,0};
         poll_config_t cfg={
@@ -163,9 +168,9 @@ int main(){
         }
         printf("%s\n",ret==1?"ok":"fail");
         poll_unloop();
-        poll_join();
+
         pthread_join(t,NULL);
     }
-
+    poll_cleanup();
     return 0;
 }
