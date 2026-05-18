@@ -17,11 +17,12 @@ typedef struct{
     void(*init)(int err,void *arg);
     void *iarg;
     unsigned int reserv;
-    int WSA; /* for Winapi only: 0 -> (2,2), -1 -> no use */
+    int WSA; /* for Winapi only: 0 -> (2,2), -1 -> no use;  used by first poll_loop and in poll_join */
 }poll_config_t;
 
 void poll_loop(poll_config_t cfg[1]);
-void poll_unloop(void);
+void poll_unloop(void); /* signal to all loops to stop */
+void poll_join(void); /* cleanup global state */
 
 /* poll_ functions below return [ 0, #INVAL, #LOOP, #NOBUFS^1 ], where '#' is OS native prefix [ E, WSAE ]. ^1: only on 'select' impl */
 int poll_recv(void *os_socket,void(*callback)(int err,void *arg),void *arg);

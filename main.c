@@ -163,6 +163,7 @@ int main(){
         }
         printf("%s\n",ret==1?"ok":"fail");
         poll_unloop();
+        poll_join();
         pthread_join(t,NULL);
     }
 
