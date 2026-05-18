@@ -136,7 +136,7 @@ int main(){
     pthread_t t;
     int i=0;
 
-    if( (i=poll_prepare(0,0)) ){ /* prepare defaults: 1 loop and WSASturtup(0x0202,...) */
+    if( (i=poll_prepare(NULL,0,0)) ){ /* prepare defaults: 1 loop and WSASturtup(0x0202,...) */
         printf("prepare err %d\n",i);
         return -1;
     }

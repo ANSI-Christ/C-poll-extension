@@ -232,24 +232,19 @@ void poll_cleanup(void){
         closesocket(sp[i].w);
     }
     _poll_cleanup(_gpoll.WSA);
-    if(_gpoll.sp!=_gpoll_sp)
-        free(_gpoll.sp);
     _gpoll.sp=_gpoll_sp;
     _gpoll.size=1;
     _gpoll.count=0;
     _gpoll.WSA=-1;
 }
 
-int poll_prepare(const unsigned int c,const int WSA){
+int poll_prepare(void *(* const p)[2],const unsigned int c,const int WSA){
+    if(c>1 && !p) return WSAEINVAL;
     if(!_poll_startup(WSA)){
         const int e=WSAGetLastError();
         return e?e:_WSAEUNKNOWN;
     }
-    if(c>1){
-        struct pollsp * const p=(struct pollsp*)malloc(sizeof(*p)*c);
-        if(!p){ _poll_cleanup(WSA); return WSAENOBUFS; }
-        _gpoll.sp=p; _gpoll.size=c;
-    }
+    if(c>1){_gpoll.sp=(struct pollsp*)p; _gpoll.size=c;}
     _gpoll.WSA=WSA;
     return 0;
 }

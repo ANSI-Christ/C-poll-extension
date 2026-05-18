@@ -19,7 +19,7 @@ typedef struct{
     unsigned int reserv;
 }poll_config_t;
 
-int poll_prepare(unsigned int max_loops,int WSA); /* max_loops default is [0,1]; WSA is for Winapi only: 0 -> (2,2), -1 -> no use */
+int poll_prepare(void *(*loops_buffer)[2],unsigned int max_loops,int WSA); /* WSA is for Winapi only: 0 -> (2,2), -1 -> no use */
 
 void poll_loop(const poll_config_t cfg[1]);
 void poll_unloop(void); /* signal to all loops to stop */
