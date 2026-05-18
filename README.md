@@ -11,6 +11,7 @@ The library doesn't hide OS specifics or impose a usage model — you get native
 - **Minimal overhead** — just event arrays, no extra allocations
 - **Cross-platform without abstractions** — native sockets and error codes (Linux/Windows/macOS/WSL)
 - **Thread-safe registration** — add sockets from any thread via a single control channel
+- **Multiple reactors support** — run several `poll_loop` instances in different threads
 - **Per-operation timeouts** — `_tm` versions
 - **Simplicity** — ~550 lines of code, easy to integrate
 - **Async code linearization** — FSM looks synchronous but doesn't block
