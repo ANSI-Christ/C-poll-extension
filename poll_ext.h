@@ -13,14 +13,14 @@
 typedef struct{
     void*(*allocator)(size_t size);
     void(*deallocator)(void *ptr);
-    size_t(*increase)(size_t old_size);
+    size_t(*resizer)(size_t size);
     void(*init)(int err,void *arg);
     void *iarg;
     unsigned int reserv;
     int WSA; /* for Winapi only: 0 -> (2,2), -1 -> no use */
 }poll_config_t;
 
-void poll_loop(poll_config_t *cfg);
+void poll_loop(poll_config_t cfg[1]);
 void poll_unloop(void);
 
 /* poll_ functions below return [ 0, #INVAL, #LOOP, #NOBUFS^1 ], where '#' is OS native prefix [ E, WSAE ]. ^1: only on 'select' impl */
