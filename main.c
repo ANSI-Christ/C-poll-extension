@@ -38,17 +38,17 @@ static void on_init(int err,void *arg){
     x[1]=err; x[0]=0;
 }
 
-
+static int waiting=0;
 
 struct statemachine{
-    int state, wait, err;
+    int state, err;
     SOCKET s;
 };
 
 static void smcallback(int err,void *arg){
     struct statemachine * const m=(struct statemachine *)arg;
     m->err=err;
-    m->wait=0;
+    waiting=0;
 }
 
 int statemachine(struct statemachine * const m){
@@ -152,13 +152,13 @@ int main(){
     }
 
     if(i){
-        struct statemachine m={0,0,0};
+        struct statemachine m={0,0};
         int ret=0;
         while(!ret){
             unsigned int sleepcnt=0;
-            while(m.wait){sleepf(0.1); printf("\r... wait %f sec",++sleepcnt*0.1); fflush(stdout);}
+            while(waiting){sleepf(0.1); printf("\r... wait %f sec",++sleepcnt*0.1); fflush(stdout);}
             printf("\n");
-            m.wait=1;
+            waiting=1;
             ret=statemachine(&m);
         }
         printf("%s\n",ret==1?"ok":"fail");
