@@ -191,7 +191,7 @@ static struct{
     struct pollsp *sp;
     unsigned int size, count;
     int WSA;
-}_gpoll={_gpoll_sp,sizeof(_gpoll_sp)/sizeof(*_gpoll_sp),0,-1};
+}_gpoll={_gpoll_sp,sizeof(_gpoll_sp)/sizeof(*_gpoll_sp),0,0};
 
 static size_t _poll_inc(const size_t s){
     return s<<1;
@@ -242,15 +242,12 @@ void poll_cleanup(void){
 }
 
 int poll_config(void *(* const p)[2],const unsigned int c,const int WSA){
-    if(c>1 && !p) return WSAEINVAL;
-    if(!_poll_startup(WSA)){
-        const int e=WSAGetLastError();
-        return e?e:_WSAEUNKNOWN;
-    }
-    if(c<2){_gpoll.sp=_gpoll_sp; _gpoll.size=sizeof(_gpoll_sp)/sizeof(*_gpoll_sp);}
-    else{_gpoll.sp=(struct pollsp*)p; _gpoll.size=c;}
-    _gpoll.WSA=WSA;
-    return 0;
+    if(c>1){
+        if(!p) return WSAEINVAL;
+        _gpoll.sp=(struct pollsp*)p; _gpoll.size=c;
+    }else{
+        _gpoll.sp=_gpoll_sp; _gpoll.size=sizeof(_gpoll_sp)/sizeof(*_gpoll_sp);
+    } _gpoll.WSA=WSA; return 0;
 }
 
 void poll_loop(const poll_config_t cfg[1]){
@@ -265,6 +262,11 @@ void poll_loop(const poll_config_t cfg[1]){
 
     if(t==_gpoll.size) return cfg->init(WSAELOOP,cfg->iarg);
 
+    if(!t && !_poll_startup(_gpoll.WSA)){
+        const int e=WSAGetLastError();
+        return cfg->init(e?e:_WSAEUNKNOWN,cfg->iarg);
+    }
+
     if(_poll_pipe(sp)){
         #ifdef SO_NOSIGPIPE
         const int opt=1;
@@ -274,6 +276,7 @@ void poll_loop(const poll_config_t cfg[1]){
         socket_mode(&sp->r,0);
     }else{
         const int e=WSAGetLastError();
+        if(!t) _poll_cleanup(_gpoll.WSA);
         return cfg->init(e?e:_WSAEUNKNOWN,cfg->iarg);
     }
 
@@ -284,6 +287,7 @@ void poll_loop(const poll_config_t cfg[1]){
         if(!fd || !cb){
             if(fd) deallocator(fd); else deallocator(cb);
             closesocket(sp->r); closesocket(sp->w);
+            if(!t) _poll_cleanup(_gpoll.WSA);
             return cfg->init(WSAENOBUFS,cfg->iarg);
         }
     }
