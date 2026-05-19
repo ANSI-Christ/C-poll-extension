@@ -19,11 +19,11 @@ typedef struct{
     unsigned int reserv;
 }poll_config_t;
 
-int poll_prepare(void *(*loops_buffer)[2],unsigned int max_loops,int WSA); /* WSA is for Winapi only: 0 -> (2,2), -1 -> no use */
+int poll_config(void *(*loops_buffer)[2],unsigned int max_loops,int WSA); /* WSA is for Winapi only: 0 -> (2,2), -1 -> no use */
 
 void poll_loop(const poll_config_t cfg[1]);
-void poll_unloop(void); /* signal to all loops to stop */
-void poll_cleanup(void); /* cleanup global state, and reset prepares */
+void poll_unloop(int wait); /* signal to all loops to stop */
+void poll_cleanup(void); /* cleanup global state */
 
 /* poll_ functions below return [ 0, #INVAL, #LOOP, #NOBUFS^1 ], where '#' is OS native prefix [ E, WSAE ]. ^1: only on 'select' impl */
 int poll_recv(void *os_socket,void(*callback)(int err,void *arg),void *arg);

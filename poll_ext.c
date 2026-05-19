@@ -96,6 +96,8 @@ typedef int SOCKET;
 #define WSAETIMEDOUT ETIMEDOUT
 #define WSAEAFNOSUPPORT EAFNOSUPPORT
 #define SD_SEND SHUT_WR
+#define SD_BOTH SHUT_RDWR
+#define SD_RECEIVE SHUT_RD
 #define _poll_startup(ver) (1)
 #define _poll_cleanup(ver) while(0)
 #define _poll_hash(_1_) (_1_)
@@ -215,36 +217,38 @@ static int _poll_add(void * const _s,const int e,void(* const f)(int,void*),void
     {const struct pollcmd cmd={{f,a,t},s,e,0}; return _poll_setcmd(_gpoll.sp[_poll_hash(s)%_gpoll.count].w,&cmd);}
 }
 
-void poll_unloop(void){
+void poll_unloop(const int wait){
     struct pollsp * const sp=_gpoll.sp;
-    unsigned int i=_gpoll.count;
-    struct pollcmd cmd; cmd.ev=0;
-    while(i) _poll_setcmd(sp[--i].w,&cmd);
+    struct pollcmd cmd; unsigned int i;
+    for(i=_gpoll.count,cmd.ev=0;i--;)
+        _poll_setcmd(sp[i].w,&cmd);
+    if(!wait) return;
+    for(i=_gpoll.count;i--;){
+        _poll_getcmd(sp[i].w,&cmd);
+        shutdown(sp[i].w,SD_RECEIVE);
+    }
 }
 
 void poll_cleanup(void){
     struct pollsp * const sp=_gpoll.sp;
     unsigned int i=_gpoll.count;
+    poll_unloop(1);
     while(i--){
-        struct pollcmd cmd;
-        _poll_getcmd(sp[i].w,&cmd);
         closesocket(sp[i].r);
         closesocket(sp[i].w);
     }
     _poll_cleanup(_gpoll.WSA);
-    _gpoll.sp=_gpoll_sp;
-    _gpoll.size=1;
     _gpoll.count=0;
-    _gpoll.WSA=-1;
 }
 
-int poll_prepare(void *(* const p)[2],const unsigned int c,const int WSA){
+int poll_config(void *(* const p)[2],const unsigned int c,const int WSA){
     if(c>1 && !p) return WSAEINVAL;
     if(!_poll_startup(WSA)){
         const int e=WSAGetLastError();
         return e?e:_WSAEUNKNOWN;
     }
-    if(c>1){_gpoll.sp=(struct pollsp*)p; _gpoll.size=c;}
+    if(c<2){_gpoll.sp=_gpoll_sp; _gpoll.size=sizeof(_gpoll_sp)/sizeof(*_gpoll_sp);}
+    else{_gpoll.sp=(struct pollsp*)p; _gpoll.size=c;}
     _gpoll.WSA=WSA;
     return 0;
 }
