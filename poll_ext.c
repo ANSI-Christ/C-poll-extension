@@ -279,8 +279,9 @@ static int _poll_setcmd(SOCKET s,const struct pollcmd * const cmd){
 }
 
 static int _poll_ptrdiff(const void * const a,const void * const b){
-    const size_t x=(size_t)a, y=(size_t)b;
-    return (x>y ? x-y : y-x) < sizeof(struct polllp)+(2<<10);
+    const char * const x=(const char*)a, * const y=(const char*)b;
+    if(x>y) return x<y+sizeof(struct polllp)+(2<<10);
+    return y<x+sizeof(struct polllp)+(2<<10);
 }
 
 static int _poll_req(void * const _s,const int e,void(* const f)(int,void*),void * const a,const time_t t){
