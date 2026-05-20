@@ -13,7 +13,7 @@ The library doesn't hide OS specifics or impose a usage model — you get native
 - **Thread-safe registration** — add sockets from any thread via a single control channel
 - **Multiple reactors support** — run several `poll_loop` instances in different threads
 - **Per-operation timeouts** — `_tm` versions
-- **Simplicity** — ~550 lines of code, easy to integrate
+- **Simplicity** — ~600 lines of code, easy to integrate
 - **Async code linearization** — FSM looks synchronous but doesn't block
 
 ## Link with flags:
