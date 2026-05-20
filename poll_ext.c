@@ -230,15 +230,17 @@ void poll_unloop(const int wait){
 }
 
 void poll_cleanup(void){
-    struct pollsp * const sp=_gpoll.sp;
     unsigned int i=_gpoll.count;
-    poll_unloop(1);
-    while(i--){
-        closesocket(sp[i].r);
-        closesocket(sp[i].w);
+    if(i){
+        struct pollsp * const sp=_gpoll.sp;
+        poll_unloop(1);
+        while(i--){
+            closesocket(sp[i].r);
+            closesocket(sp[i].w);
+        }
+        _poll_cleanup(_gpoll.WSA);
+        _gpoll.count=0;
     }
-    _poll_cleanup(_gpoll.WSA);
-    _gpoll.count=0;
 }
 
 int poll_config(void *(* const p)[2],const unsigned int c,const int WSA){
