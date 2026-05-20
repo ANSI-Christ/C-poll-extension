@@ -61,7 +61,7 @@ int socket_mode(void * const s,const int b){
     u_long opt=!b; return ioctlsocket(*(SOCKET*)s,FIONBIO,&opt);
 }
 
-#define _poll_hash(_1_) ((sizeof(SOCKET) == 2 ? _SOCK_HASH16 : (sizeof(SOCKET*) == 4 ? _SOCK_HASH32 : _SOCK_HASH64) ) * (size_t)(_1_))
+#define _poll_hash(_1_) ((sizeof(SOCKET) == 2 ? _SOCK_HASH16 : (sizeof(SOCKET) == 4 ? _SOCK_HASH32 : _SOCK_HASH64) ) * (size_t)(_1_))
 #define _SOCK_HASH16 ((size_t)0x9E37u)
 #define _SOCK_HASH32 (_SOCK_HASH16*256*(size_t)256 + 0x79B9u)
 #define _SOCK_HASH64 (_SOCK_HASH32*256*(size_t)256 + (size_t)0x7F4Au*256*(size_t)256 + 0x7C15u)
