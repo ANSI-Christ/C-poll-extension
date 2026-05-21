@@ -278,8 +278,8 @@ static int _poll_setcmd(SOCKET s,const struct pollcmd * const cmd){
     return 0;
 }
 
-static int _poll_ptrdiff(const void * const a,const void * const b){
-    const char * const x=(const char*)a, * const y=(const char*)b;
+static int _poll_inloop(const void * const lp,const void * const stack){
+    const char * const x=((const char*)lp)+sizeof(struct polllp)/2, * const y=(const char*)stack;
     if(x>y) return x<y+sizeof(struct polllp)+(2<<10);
     return y<x+sizeof(struct polllp)+(2<<10);
 }
@@ -293,7 +293,7 @@ static int _poll_req(void * const _s,const int e,void(* const f)(int,void*),void
     {
         const struct pollcmd cmd[1]={{{f,a,t},s,e,0}};
         const unsigned int id=_poll_hash(s)%_gpoll.count;
-        if(_poll_ptrdiff(_gpoll.sp[id].lp,&e))
+        if(_poll_inloop(_gpoll.sp[id].lp,cmd))
             return _poll_add(_gpoll.sp[id].lp,cmd);
         return _poll_setcmd(_gpoll.sp[id].w,cmd);
     }
