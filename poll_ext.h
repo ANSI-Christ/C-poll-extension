@@ -14,7 +14,7 @@ typedef struct{
     void*(*allocator)(size_t size);
     void(*deallocator)(void *ptr);
     size_t(*resizer)(size_t size);
-    void(*init)(int err,void *arg);
+    void(*init)(int err,void *iarg);
     void *iarg;
     unsigned int reserv;
 }poll_config_t;
