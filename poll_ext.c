@@ -394,7 +394,10 @@ void poll_loop(const poll_config_t cfg[1]){
             if(ev){
                 const struct pollcb f=lp->cb[i]; SOCKET s=lp->fd[i].fd; int err=0;
                  --c; t-=(f.t!=0); _poll_remove(lp,i);
-                if(ev & POLLERR) _poll_getopt(s,SO_ERROR,&err,sizeof(err));
+                if(ev & POLLERR){
+                    if(_poll_getopt(s,SO_ERROR,&err,sizeof(err))==SOCKET_ERROR) err=WSAGetLastError();
+                    else if(!err) err=_WSAEUNKNOWN;
+                }
                 if(ev & POLLNVAL) err=WSAEBADF;
                 f.f(err,f.a);
             }else if(lp->cb[i].t){
