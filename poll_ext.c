@@ -24,7 +24,7 @@ static int _poll_startup(int ver){
     WSADATA w;
     if(ver==-1) return 1;
     if(!ver) ver=MAKEWORD(2,2);
-    return !WSAStartup(ver,&w);
+    return WSAStartup(ver,&w);
 }
 
 static void _poll_cleanup(const int ver){
@@ -98,7 +98,7 @@ typedef int SOCKET;
 #define SD_SEND SHUT_WR
 #define SD_BOTH SHUT_RDWR
 #define SD_RECEIVE SHUT_RD
-#define _poll_startup(ver) (1)
+#define _poll_startup(ver) (0)
 #define _poll_cleanup(ver) while(0)
 #define _poll_hash(_1_) (_1_)
 
@@ -341,9 +341,9 @@ void poll_loop(const poll_config_t cfg[1]){
 
     if(t==_gpoll.size) return cfg->init(WSAELOOP,cfg->iarg);
 
-    if(!t && !_poll_startup(_gpoll.WSA)){
-        const int e=WSAGetLastError();
-        return cfg->init(e?e:_WSAEUNKNOWN,cfg->iarg);
+    if(!t){
+        const int e=_poll_startup(_gpoll.WSA);
+        if(e) return cfg->init(e,cfg->iarg);
     }
 
     if(_poll_pipe(sp)){
