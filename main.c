@@ -138,7 +138,7 @@ int main(){
 
     {
         int sync[2]={1,0};
-        poll_config_t cfg={
+        struct poll_loop cfg={
             .init=on_init,
             .iarg=sync
         };

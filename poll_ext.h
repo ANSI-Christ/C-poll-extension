@@ -10,18 +10,18 @@
 
 /* poll part */
 
-typedef struct{
+struct poll_loop{
     void*(*allocator)(size_t size);
     void(*deallocator)(void *ptr);
     size_t(*resizer)(size_t size);
     void(*init)(int err,void *iarg);
     void *iarg;
     unsigned int reserv;
-}poll_config_t;
+};
 
 int poll_config(void *(*loops_buffer)[3],unsigned int max_loops,int WSA); /* WSA is for Winapi only: 0 -> (2,2), -1 -> no use */
 
-void poll_loop(const poll_config_t cfg[1]);
+void poll_loop(const struct poll_loop cfg[1]);
 void poll_unloop(int wait); /* signal to all loops to stop */
 void poll_cleanup(void); /* cleanup global state */
 

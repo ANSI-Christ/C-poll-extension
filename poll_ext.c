@@ -226,7 +226,7 @@ static int _poll_resize(struct polllp * const lp){
     return 0;
 }}
 
-static int _poll_init(struct polllp * const lp,const poll_config_t * const cfg){
+static int _poll_init(struct polllp * const lp,const struct poll_loop * const cfg){
     lp->allocator=(cfg->allocator ? cfg->allocator : malloc);
     lp->deallocator=(cfg->deallocator ? cfg->deallocator : free);
     lp->inc=(cfg->resizer ? cfg->resizer : _poll_inc);
@@ -334,7 +334,7 @@ int poll_config(void *(* const p)[3],const unsigned int c,const int WSA){
     } _gpoll.WSA=WSA; return 0;
 }
 
-void poll_loop(const poll_config_t cfg[1]){
+void poll_loop(const struct poll_loop cfg[1]){
     struct polllp lp[1];
     struct pollsp * const sp=_gpoll.sp+_gpoll.count;
     unsigned int t=_gpoll.count;
