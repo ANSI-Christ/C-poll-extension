@@ -226,7 +226,7 @@ static int _poll_resize(struct polllp * const lp){
     return 0;
 }}
 
-static int _poll_init(struct polllp * const lp,const struct poll_loop * const cfg){
+static int _poll_init(struct polllp * const lp,struct pollsp * const sp,const struct poll_loop * const cfg){
     lp->allocator=(cfg->allocator ? cfg->allocator : malloc);
     lp->deallocator=(cfg->deallocator ? cfg->deallocator : free);
     lp->inc=(cfg->resizer ? cfg->resizer : _poll_inc);
@@ -234,17 +234,19 @@ static int _poll_init(struct polllp * const lp,const struct poll_loop * const cf
     lp->count=_poll_szlim(cfg->reserv);
     lp->size=_poll_szlim(sizeof(lp->_fd)/sizeof(*lp->_fd));
     if(!_poll_resize(lp)) return WSAENOBUFS;
+    lp->fd->fd=sp->r; lp->fd->events=POLLIN;
     lp->count=1; lp->timers=0; lp->timeout=-1;
-    return 0;
+    sp->lp=lp; return 0;
 }
 
 static void _poll_close(struct polllp * const lp){
-    while(--lp->count) lp->cb[lp->count].f(WSAELOOP,lp->cb[lp->count].a);
+    for(lp->size=0;--lp->count;) lp->cb[lp->count].f(WSAELOOP,lp->cb[lp->count].a);
     if(lp->cb!=lp->_cb) lp->deallocator(lp->cb);
     if(lp->fd!=lp->_fd) lp->deallocator(lp->fd);
 }
 
 static int _poll_add(struct polllp * const lp,const struct pollcmd * const cmd){
+    if(!lp->size) return WSAELOOP;
     if(_poll_resize(lp)){
         const unsigned int i=lp->count++;
         lp->cb[i]=cmd->cb;
@@ -359,17 +361,16 @@ void poll_loop(const struct poll_loop cfg[1]){
         return cfg->init(e?e:_WSAEUNKNOWN,cfg->iarg);
     }
 
-    if(_poll_init(lp,cfg)){
+    if(_poll_init(lp,sp,cfg)){
         closesocket(sp->r); closesocket(sp->w);
         if(!t) _poll_cleanup(_gpoll.WSA);
         return cfg->init(WSAENOBUFS,cfg->iarg);
     }
 
-    sp->lp=lp;
     ++_gpoll.count;
     cfg->init(0,cfg->iarg);
 
-    for(lp->fd->fd=sp->r, lp->fd->events=POLLIN, t=0; lp->size;){
+    for(t=0;;){
         const int _c=WSAPoll(lp->fd,lp->count,lp->timeout);
         unsigned int i=lp->count, c=((_c!=SOCKET_ERROR)?_c:0);
         lp->timeout=86400;
@@ -379,9 +380,11 @@ void poll_loop(const struct poll_loop cfg[1]){
             while(_poll_getcmd(sp->r,&cmd) && --repeat){
                 if(!cmd.ev){
                     shutdown(sp->w,SD_SEND);
+                    _poll_close(lp);
                     while(_poll_getcmd(sp->r,&cmd))
                         if(cmd.ev) cmd.cb.f(WSAELOOP,cmd.cb.a);
-                    lp->size=0; break;
+                    _poll_setcmd(sp->r,&cmd);
+                    return;
                 }
                 if(_poll_add(lp,&cmd))
                     cmd.cb.f(WSAENOBUFS,cmd.cb.a);
@@ -414,9 +417,6 @@ void poll_loop(const struct poll_loop cfg[1]){
         else lp->timeout=-1;
         lp->timers=0;
     }
-
-    _poll_close(lp);
-    {struct pollcmd cmd; _poll_setcmd(sp->r,&cmd);}
 }
 
 int poll_recv(void * const s,void(* const f)(int,void*),void * const a){
