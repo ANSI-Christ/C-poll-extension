@@ -246,7 +246,6 @@ static void _poll_close(struct polllp * const lp){
 }
 
 static int _poll_add(struct polllp * const lp,const struct pollcmd * const cmd){
-    if(!lp->size) return WSAELOOP;
     if(_poll_resize(lp)){
         const unsigned int i=lp->count++;
         lp->cb[i]=cmd->cb;
@@ -294,10 +293,11 @@ static int _poll_req(void * const _s,const int e,void(* const f)(int,void*),void
     #endif
     {
         const struct pollcmd cmd[1]={{{f,a,t},s,e,0}};
-        const unsigned int id=_poll_hash(s)%_gpoll.count;
-        if(_poll_inloop(_gpoll.sp[id].lp,cmd))
-            return _poll_add(_gpoll.sp[id].lp,cmd);
-        return _poll_setcmd(_gpoll.sp[id].w,cmd);
+        const struct pollsp * const sp=_gpoll.sp+(_poll_hash(s)%_gpoll.count);
+        if(_poll_inloop(sp->lp,cmd)){
+            if(sp->lp->size) return _poll_add(sp->lp,cmd);
+            return WSAELOOP;
+        } return _poll_setcmd(sp->w,cmd);
     }
 }
 
