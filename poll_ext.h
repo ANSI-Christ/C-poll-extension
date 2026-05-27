@@ -19,7 +19,7 @@ struct poll_loop{
     unsigned int reserv;
 };
 
-int poll_config(void *(*loops_buffer)[3],unsigned int max_loops,int WSA); /* WSA is for Winapi only: 0 -> (2,2), -1 -> no use */
+int poll_config(void *(*loops_buffer)[4],unsigned int max_loops,int WSA); /* WSA is for Winapi only: 0 -> (2,2), -1 -> no use */
 
 void poll_loop(const struct poll_loop cfg[1]);
 void poll_unloop(int wait); /* signal to all loops to stop */

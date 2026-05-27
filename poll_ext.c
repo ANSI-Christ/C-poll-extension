@@ -6,6 +6,7 @@
 #include "poll_ext.h"
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <time.h>
 
 #ifdef offsetof
@@ -79,7 +80,6 @@ int socket_mode(void * const s,const int b){
 #endif
 #include <fcntl.h>
 #include <unistd.h>
-#include <errno.h>
 
 typedef int SOCKET;
 #define INVALID_SOCKET -1
@@ -197,6 +197,7 @@ struct polllp{
 
 static struct pollsp{
     SOCKET r,w;
+    int *tid;
     struct polllp *lp;
 }_gpoll_sp[1];
 
@@ -247,7 +248,7 @@ static int _poll_init(struct polllp * const lp,struct pollsp * const sp,const st
     if(!_poll_resize(lp)) return WSAENOBUFS;
     lp->fd->fd=sp->r; lp->fd->events=POLLIN;
     lp->count=1; lp->timers=0; lp->timeout=-1;
-    sp->lp=lp; return 0;
+    sp->tid=&errno; sp->lp=lp; return 0;
 }
 
 static void _poll_close(struct polllp * const lp,struct pollsp * const sp){
@@ -285,12 +286,6 @@ static void _poll_remove(struct polllp * const lp,const unsigned int i){
     lp->fd[i]=lp->fd[x];
 }
 
-static int _poll_inloop(const void * const lp,const void * const stack){
-    const char * const x=((const char*)lp)+sizeof(struct polllp)/2, * const y=(const char*)stack;
-    if(x>y) return x<y+sizeof(struct polllp)+(2<<10);
-    return y<x+sizeof(struct polllp)+(2<<10);
-}
-
 static int _poll_req(void * const _s,const int e,void(* const f)(int,void*),void * const a,const time_t t){
     SOCKET s; if(!_gpoll.count) return WSAELOOP;
     if(!_s || (s=*(SOCKET*)_s)==INVALID_SOCKET || !f) return WSAEINVAL;
@@ -300,7 +295,7 @@ static int _poll_req(void * const _s,const int e,void(* const f)(int,void*),void
     {
         const struct pollcmd cmd[1]={{{f,a,t},s,e,0}};
         const struct pollsp * const sp=_gpoll.sp+(_poll_hash(s)%_gpoll.count);
-        if(_poll_inloop(sp->lp,cmd)){
+        if(sp->tid==&errno){
             if(sp->lp->size) return _poll_add(sp->lp,cmd);
             return WSAELOOP;
         } return _poll_setcmd(sp->w,cmd);
@@ -333,7 +328,7 @@ void poll_cleanup(void){
     }
 }
 
-int poll_config(void *(* const p)[3],const unsigned int c,const int WSA){
+int poll_config(void *(* const p)[4],const unsigned int c,const int WSA){
     if(c>1){
         if(!p) return WSAEINVAL;
         _gpoll.sp=(struct pollsp*)p; _gpoll.size=c;
