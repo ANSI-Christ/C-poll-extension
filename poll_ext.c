@@ -18,18 +18,30 @@
 #ifdef _WIN32
 
 #define NOMINMAX
+#ifdef POLL_BY_SELECT
+#include <winsock.h>
+#define _POLL_WSA 0x0101
+#else
 #include <winsock2.h>
+#define _POLL_WSA 0x0202
+#endif
 #undef NOMINMAX
 
-static int _poll_startup(int ver){
-    WSADATA w;
-    if(ver==-1) return 1;
-    if(!ver) ver=MAKEWORD(2,2);
-    return WSAStartup(ver,&w);
+static WORD _poll_WSA=_POLL_WSA;
+
+static void _poll_cleanup(void){
+    if(_poll_WSA!=-1) WSACleanup();
 }
 
-static void _poll_cleanup(const int ver){
-    if(ver!=-1) WSACleanup();
+static int _poll_startup(void){
+    if(_poll_WSA!=-1){
+        WSADATA w; const int e=WSAStartup(_poll_WSA,&w);
+        if(e) return e;
+        if(w.wVersion!=_poll_WSA){
+            _poll_cleanup();
+            return WSAVERNOTSUPPORTED;
+        }
+    } return 0;
 }
 
 #define _poll_setopt(_s_,_o_,_p_,_l_) setsockopt((_s_),SOL_SOCKET,(_o_),(const char*)(_p_),(_l_))
@@ -98,8 +110,8 @@ typedef int SOCKET;
 #define SD_SEND SHUT_WR
 #define SD_BOTH SHUT_RDWR
 #define SD_RECEIVE SHUT_RD
-#define _poll_startup(ver) (0)
-#define _poll_cleanup(ver) while(0)
+#define _poll_startup() 0
+#define _poll_cleanup() while(0)
 #define _poll_hash(_1_) (_1_)
 
 #define _poll_setopt(_s_,_o_,_p_,_l_) setsockopt((_s_),SOL_SOCKET,(_o_),(_p_),(_l_))
@@ -204,8 +216,7 @@ static struct pollsp{
 static struct{
     struct pollsp *sp;
     unsigned int size, count;
-    int WSA;
-}_gpoll={_gpoll_sp,sizeof(_gpoll_sp)/sizeof(*_gpoll_sp),0,0};
+}_gpoll={_gpoll_sp,sizeof(_gpoll_sp)/sizeof(*_gpoll_sp),0};
 
 
 static int _poll_getcmd(SOCKET s,struct pollcmd * const cmd){
@@ -323,7 +334,7 @@ void poll_cleanup(void){
             closesocket(sp[i].r);
             closesocket(sp[i].w);
         }
-        _poll_cleanup(_gpoll.WSA);
+        _poll_cleanup();
         _gpoll.count=0;
     }
 }
@@ -334,7 +345,11 @@ int poll_config(void *(* const p)[4],const unsigned int c,const int WSA){
         _gpoll.sp=(struct pollsp*)p; _gpoll.size=c;
     }else{
         _gpoll.sp=_gpoll_sp; _gpoll.size=sizeof(_gpoll_sp)/sizeof(*_gpoll_sp);
-    } _gpoll.WSA=WSA; return 0;
+    }
+    #ifdef _WIN32
+    _poll_WSA=(WSA ? WSA : _POLL_WSA);
+    #endif
+    return 0;
 }
 
 void poll_loop(const struct poll_loop cfg[1]){
@@ -345,7 +360,7 @@ void poll_loop(const struct poll_loop cfg[1]){
     if(t==_gpoll.size) return cfg->init(WSAELOOP,cfg->iarg);
 
     if(!t){
-        const int e=_poll_startup(_gpoll.WSA);
+        const int e=_poll_startup();
         if(e) return cfg->init(e,cfg->iarg);
     }
 
@@ -358,13 +373,13 @@ void poll_loop(const struct poll_loop cfg[1]){
         socket_mode(&sp->r,0);
     }else{
         const int e=WSAGetLastError();
-        if(!t) _poll_cleanup(_gpoll.WSA);
+        if(!t) _poll_cleanup();
         return cfg->init(e?e:_WSAEUNKNOWN,cfg->iarg);
     }
 
     if(_poll_init(lp,sp,cfg)){
         closesocket(sp->r); closesocket(sp->w);
-        if(!t) _poll_cleanup(_gpoll.WSA);
+        if(!t) _poll_cleanup();
         return cfg->init(WSAENOBUFS,cfg->iarg);
     }
 
