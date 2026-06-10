@@ -339,7 +339,7 @@ void poll_cleanup(void){
     }
 }
 
-int poll_config(void *(* const p)[4],const unsigned int c,const int WSA){
+int poll_config(void *p[][4],const unsigned int c,const int WSA){
     if(c>1){
         if(!p) return WSAEINVAL;
         _gpoll.sp=(struct pollsp*)p; _gpoll.size=c;
