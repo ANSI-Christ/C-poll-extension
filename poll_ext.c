@@ -155,7 +155,6 @@ static int WSAPoll(struct pollfd * const p,const int cnt,const int timeout){
     SOCKET max=p->fd; int i,s,c;
     fd_set set[3]; FD_ZERO(set);FD_ZERO(set+1);FD_ZERO(set+2);
     for(i=0;i<cnt;++i){
-        p[i].revents=0;
         if(p[i].events & POLLIN) FD_SET(p[i].fd,set);
         if(p[i].events & POLLOUT) FD_SET(p[i].fd,set+1);
         FD_SET(p[i].fd,set+2);
@@ -181,6 +180,7 @@ static unsigned int _poll_szlim(const unsigned int size){
 #endif
 
 #define _poll_time() time(NULL)
+#define _poll_tid() (&errno)
 
 struct pollcb{
     void(*f)(int,void*);
@@ -202,7 +202,7 @@ struct polllp{
     struct pollcb *cb;
     struct pollfd *fd;
     unsigned int count, size, timers;
-    long timeout;
+    time_t abstime;
     struct pollcb _cb[192];
     struct pollfd _fd[192];
 };
@@ -258,8 +258,8 @@ static int _poll_init(struct polllp * const lp,struct pollsp * const sp,const st
     lp->size=_poll_szlim(sizeof(lp->_fd)/sizeof(*lp->_fd));
     if(!_poll_resize(lp)) return WSAENOBUFS;
     lp->fd->fd=sp->r; lp->fd->events=POLLIN;
-    lp->count=1; lp->timers=0; lp->timeout=-1;
-    sp->tid=&errno; sp->lp=lp; return 0;
+    lp->fd->revents=0; lp->count=1; lp->timers=0;
+    sp->tid=_poll_tid(); sp->lp=lp; return 0;
 }
 
 static void _poll_close(struct polllp * const lp,struct pollsp * const sp){
@@ -280,9 +280,10 @@ static int _poll_add(struct polllp * const lp,const struct pollcmd * const cmd){
         lp->cb[i]=cmd->cb;
         lp->fd[i].fd=cmd->fd;
         lp->fd[i].events=cmd->ev;
+        lp->fd[i].revents=0;
         if(cmd->cb.t){
-            const long d=cmd->cb.t-_poll_time();
-            if(d<lp->timeout) lp->timeout=d;
+            if(cmd->cb.t<lp->abstime)
+                lp->abstime=cmd->cb.t;
             ++lp->timers;
         }
         return 0;
@@ -290,11 +291,15 @@ static int _poll_add(struct polllp * const lp,const struct pollcmd * const cmd){
     return WSAENOBUFS;
 }
 
-static void _poll_remove(struct polllp * const lp,const unsigned int i){
+static void _poll_del(struct polllp * const lp,const unsigned int i,const int err){
+    void(* const f)(int,void*)=lp->cb[i].f;
+    void * const a=lp->cb[i].a;
     const unsigned int x=--lp->count;
-    if(i==x) return;
-    lp->cb[i]=lp->cb[x];
-    lp->fd[i]=lp->fd[x];
+    if(i!=x){
+        lp->cb[i]=lp->cb[x];
+        lp->fd[i]=lp->fd[x];
+    }
+    f(err,a);
 }
 
 static int _poll_req(void * const _s,const int e,void(* const f)(int,void*),void * const a,const time_t t){
@@ -306,7 +311,7 @@ static int _poll_req(void * const _s,const int e,void(* const f)(int,void*),void
     {
         const struct pollcmd cmd[1]={{{f,a,t},s,e,0}};
         const struct pollsp * const sp=_gpoll.sp+(_poll_hash(s)%_gpoll.count);
-        if(sp->tid==&errno){
+        if(sp->tid==_poll_tid()){
             if(sp->lp->size) return _poll_add(sp->lp,cmd);
             return WSAELOOP;
         } return _poll_setcmd(sp->w,cmd);
@@ -356,6 +361,7 @@ void poll_loop(const struct poll_loop cfg[1]){
     struct polllp lp[1];
     struct pollsp * const sp=_gpoll.sp+_gpoll.count;
     unsigned int t=_gpoll.count;
+    long timeout=-1;
 
     if(t==_gpoll.size) return cfg->init(WSAELOOP,cfg->iarg);
 
@@ -387,44 +393,55 @@ void poll_loop(const struct poll_loop cfg[1]){
     cfg->init(0,cfg->iarg);
 
     for(t=0;;){
-        const int _c=WSAPoll(lp->fd,lp->count,lp->timeout);
-        unsigned int i=lp->count, c=((_c!=SOCKET_ERROR)?_c:0);
-        lp->timeout=86400;
+        unsigned int c=WSAPoll(lp->fd,lp->count,timeout);
+        if(c!=SOCKET_ERROR){
+            const time_t now=_poll_time();
+            unsigned int i=lp->count;
+            lp->abstime=now+86400;
 
-        if(c && lp->fd->revents){
-            struct pollcmd cmd; unsigned int repeat=20;
-            while(_poll_getcmd(sp->r,&cmd) && --repeat){
-                if(!cmd.ev) goto _exit_mark;
-                if(_poll_add(lp,&cmd))
-                    cmd.cb.f(WSAENOBUFS,cmd.cb.a);
-            }
-            --c;
-        }
-
-        while((c|t) && --i){
-            const short ev=lp->fd[i].revents;
-            if(ev){
-                const struct pollcb f=lp->cb[i]; SOCKET s=lp->fd[i].fd; int err=0;
-                 --c; t-=(f.t!=0); _poll_remove(lp,i);
-                if(ev & POLLERR){
-                    if(_poll_getopt(s,SO_ERROR,&err,sizeof(err))==SOCKET_ERROR) err=WSAGetLastError();
-                    else if(!err) err=_WSAEUNKNOWN;
+            if(c && lp->fd->revents){
+                struct pollcmd cmd; unsigned int repeat=20;
+                --c; lp->fd->revents=0;
+                while(_poll_getcmd(sp->r,&cmd) && --repeat){
+                    if(!cmd.ev) goto _exit_mark;
+                    if(_poll_add(lp,&cmd))
+                        cmd.cb.f(WSAENOBUFS,cmd.cb.a);
                 }
-                if(ev & POLLNVAL) err=WSAEBADF;
-                f.f(err,f.a);
-            }else if(lp->cb[i].t){
-                const long d=lp->cb[i].t-_poll_time();
-                if(d<=0){
-                    const struct pollcb f=lp->cb[i];
-                    --t; _poll_remove(lp,i);
-                    f.f(WSAETIMEDOUT,f.a);
-                }else if(d<lp->timeout) lp->timeout=d;
             }
-        }
 
-        if( (t+=lp->timers) ) lp->timeout*=(lp->timeout>0)*1000;
-        else lp->timeout=-1;
-        lp->timers=0;
+            while((c|t) && --i){
+                const time_t tm=lp->cb[i].t;
+                const short ev=lp->fd[i].revents;
+                if(ev){
+                    int err=0;
+                    if(ev & POLLNVAL) err=WSAEBADF;
+                    else if(ev & POLLERR){
+                        if(_poll_getopt(lp->fd[i].fd,SO_ERROR,&err,sizeof(err))==SOCKET_ERROR)
+                            err=WSAGetLastError();
+                        if(!err) err=_WSAEUNKNOWN;
+                    }
+                    --c; t-=(tm!=0); _poll_del(lp,i,err);
+                }else if(tm){
+                    if(tm<=now){
+                        --t; _poll_del(lp,i,WSAETIMEDOUT);
+                    }else if(tm<lp->abstime)
+                        lp->abstime=tm;
+                }
+            }
+
+            if( (t+=lp->timers) ){
+                lp->timers=0;
+                timeout=lp->abstime-_poll_time();
+                timeout*=(timeout>0)*1000;
+            }else timeout=-1;
+
+        }else{
+            if(lp->count>1 && WSAGetLastError()!=WSAEINTR){
+                const struct pollcb * const f=lp->cb+(--lp->count);
+                t-=(f->t!=0); f->f(WSAENOBUFS,f->a);
+            }
+            timeout=(t?1000:-1);
+        }
     }
 _exit_mark:
     _poll_close(lp,sp);
