@@ -257,8 +257,8 @@ static int _poll_init(struct polllp * const lp,struct pollsp * const sp,const st
     lp->count=_poll_szlim(cfg->reserv);
     lp->size=_poll_szlim(sizeof(lp->_fd)/sizeof(*lp->_fd));
     if(!_poll_resize(lp)) return WSAENOBUFS;
-    lp->fd->fd=sp->r; lp->fd->events=POLLIN;
-    lp->fd->revents=0; lp->count=1; lp->timers=0;
+    lp->fd->fd=sp->r; lp->fd->events=POLLIN; lp->fd->revents=0;
+    lp->count=1; lp->timers=0; lp->abstime=_poll_time()+86400;
     sp->tid=_poll_tid(); sp->lp=lp; return 0;
 }
 
@@ -361,7 +361,7 @@ void poll_loop(const struct poll_loop cfg[1]){
     struct polllp lp[1];
     struct pollsp * const sp=_gpoll.sp+_gpoll.count;
     unsigned int t=_gpoll.count;
-    long timeout=-1;
+    long timeout;
 
     if(t==_gpoll.size) return cfg->init(WSAELOOP,cfg->iarg);
 
@@ -391,8 +391,9 @@ void poll_loop(const struct poll_loop cfg[1]){
 
     ++_gpoll.count;
     cfg->init(0,cfg->iarg);
+    t=0; goto _timer_mark;
 
-    for(t=0;;){
+    while('0'){
         unsigned int c=WSAPoll(lp->fd,lp->count,timeout);
         if(c!=SOCKET_ERROR){
             const time_t now=_poll_time();
@@ -428,7 +429,7 @@ void poll_loop(const struct poll_loop cfg[1]){
                         lp->abstime=tm;
                 }
             }
-
+_timer_mark:
             if( (t+=lp->timers) ){
                 lp->timers=0;
                 timeout=lp->abstime-_poll_time();
